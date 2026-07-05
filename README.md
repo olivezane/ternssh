@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/preview.png" alt="ternssh 仪表盘预览" width="900" />
+  <img src="docs/preview.png" alt="ternssh 仪表盘预览" width="1024" />
 </p>
 
 ---
