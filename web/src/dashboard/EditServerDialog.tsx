@@ -8,19 +8,19 @@ import { useT } from "@/i18n";
 import { api, type Server } from "@/lib/api";
 import { maybeSavePrivateKey } from "@/lib/saved-private-keys";
 
-interface CopyServerDialogProps {
+interface EditServerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  source: Server | null;
-  onCopied: () => Promise<void>;
+  server: Server | null;
+  onUpdated: () => Promise<void>;
 }
 
-export function CopyServerDialog({
+export function EditServerDialog({
   open,
   onOpenChange,
-  source,
-  onCopied,
-}: CopyServerDialogProps) {
+  server,
+  onUpdated,
+}: EditServerDialogProps) {
   const t = useT();
   const [name, setName] = useState("");
   const [host, setHost] = useState("");
@@ -36,42 +36,46 @@ export function CopyServerDialog({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open || !source) return;
-    setName(`${source.name}${t("copyServer.nameSuffix")}`);
-    setHost(source.host);
-    setPort(String(source.port));
-    setUsername(source.username);
-    setAuthType(source.auth_type);
+    if (!open || !server) return;
+    setName(server.name);
+    setHost(server.host);
+    setPort(String(server.port));
+    setUsername(server.username);
+    setAuthType(server.auth_type);
     setCredential("");
     setSaveKey(false);
     setKeyName("");
     setError(null);
-  }, [open, source, t]);
+  }, [open, server]);
 
-  if (!open || !source) return null;
+  if (!open || !server) return null;
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    const trimmedCredential = credential.trim();
+    if (authType !== server.auth_type && !trimmedCredential) {
+      setError(t("editServer.credentialRequiredOnAuthChange"));
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     try {
-      const trimmedCredential = credential.trim();
-      await api.copyServer(source.id, {
+      await api.updateServer(server.id, {
         name,
         host,
         port: Number(port),
         username,
         auth_type: authType,
-        group_id: source.group_id,
         ...(trimmedCredential ? { credential: trimmedCredential } : {}),
       });
-      if (authType === "private_key" && trimmedCredential) {
+      if (authType === "private_key") {
         maybeSavePrivateKey(keyName, trimmedCredential, saveKey);
       }
       onOpenChange(false);
-      await onCopied();
+      await onUpdated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("copyServer.createFailed"));
+      setError(err instanceof Error ? err.message : t("editServer.updateFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -80,7 +84,7 @@ export function CopyServerDialog({
   return (
     <Modal className="max-w-lg" open={open} onOpenChange={onOpenChange}>
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t("copyServer.title")}</h2>
+        <h2 className="text-lg font-semibold">{t("editServer.title")}</h2>
         <Button variant="ghost" onClick={() => onOpenChange(false)}>
           {t("common.close")}
         </Button>
@@ -88,9 +92,9 @@ export function CopyServerDialog({
 
       <form className="space-y-4" onSubmit={(event) => void handleSubmit(event)}>
         <div className="grid gap-2">
-          <Label htmlFor="copy-name">{t("common.name")}</Label>
+          <Label htmlFor="edit-name">{t("common.name")}</Label>
           <Input
-            id="copy-name"
+            id="edit-name"
             value={name}
             onChange={(event) => setName(event.target.value)}
             required
@@ -98,18 +102,18 @@ export function CopyServerDialog({
         </div>
         <div className="grid grid-cols-3 gap-3">
           <div className="col-span-2 grid gap-2">
-            <Label htmlFor="copy-host">{t("addServer.host")}</Label>
+            <Label htmlFor="edit-host">{t("addServer.host")}</Label>
             <Input
-              id="copy-host"
+              id="edit-host"
               value={host}
               onChange={(event) => setHost(event.target.value)}
               required
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="copy-port">{t("addServer.port")}</Label>
+            <Label htmlFor="edit-port">{t("addServer.port")}</Label>
             <Input
-              id="copy-port"
+              id="edit-port"
               value={port}
               onChange={(event) => setPort(event.target.value)}
               required
@@ -117,18 +121,18 @@ export function CopyServerDialog({
           </div>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="copy-username">{t("addServer.username")}</Label>
+          <Label htmlFor="edit-username">{t("addServer.username")}</Label>
           <Input
-            id="copy-username"
+            id="edit-username"
             value={username}
             onChange={(event) => setUsername(event.target.value)}
             required
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="copy-authType">{t("addServer.authType")}</Label>
+          <Label htmlFor="edit-authType">{t("addServer.authType")}</Label>
           <select
-            id="copy-authType"
+            id="edit-authType"
             className="flex h-9 w-full bg-[var(--color-secondary)] px-3 text-sm"
             value={authType}
             onChange={(event) =>
@@ -140,33 +144,33 @@ export function CopyServerDialog({
           </select>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="copy-credential">
+          <Label htmlFor="edit-credential">
             {authType === "password"
               ? t("addServer.password")
               : t("addServer.privateKeyContent")}
           </Label>
           {authType === "password" ? (
             <Input
-              id="copy-credential"
+              id="edit-credential"
               type="password"
               value={credential}
               onChange={(event) => setCredential(event.target.value)}
-              placeholder={t("copyServer.credentialPlaceholder")}
+              placeholder={t("editServer.credentialPlaceholder")}
             />
           ) : (
             <PrivateKeyField
-              id="copy-credential"
+              id="edit-credential"
               value={credential}
               onChange={setCredential}
               saveKey={saveKey}
               onSaveKeyChange={setSaveKey}
               keyName={keyName}
               onKeyNameChange={setKeyName}
-              placeholder={t("copyServer.credentialPlaceholder")}
+              placeholder={t("editServer.credentialPlaceholder")}
             />
           )}
           <p className="text-[11px] text-[var(--color-muted-foreground)]">
-            {t("copyServer.credentialHint")}
+            {t("editServer.credentialHint")}
           </p>
         </div>
 

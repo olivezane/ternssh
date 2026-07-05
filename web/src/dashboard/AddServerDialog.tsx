@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { Modal } from "@/components/Modal";
+import { PrivateKeyField } from "@/components/PrivateKeyField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useT } from "@/i18n";
 import { api } from "@/lib/api";
+import { maybeSavePrivateKey } from "@/lib/saved-private-keys";
 
 interface AddServerDialogProps {
   open: boolean;
@@ -28,6 +30,8 @@ export function AddServerDialog({
     "password",
   );
   const [credential, setCredential] = useState("");
+  const [saveKey, setSaveKey] = useState(false);
+  const [keyName, setKeyName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,6 +44,8 @@ export function AddServerDialog({
     setUsername("");
     setAuthType("password");
     setCredential("");
+    setSaveKey(false);
+    setKeyName("");
     setError(null);
   };
 
@@ -48,15 +54,19 @@ export function AddServerDialog({
     setSubmitting(true);
     setError(null);
     try {
+      const trimmedCredential = credential.trim();
       await api.createServer({
         name,
         host,
         port: Number(port),
         username,
         auth_type: authType,
-        credential,
+        credential: trimmedCredential,
         group_id: groupId,
       });
+      if (authType === "private_key") {
+        maybeSavePrivateKey(keyName, trimmedCredential, saveKey);
+      }
       reset();
       await onCreated();
     } catch (err) {
@@ -143,11 +153,14 @@ export function AddServerDialog({
                 required
               />
             ) : (
-              <textarea
+              <PrivateKeyField
                 id="credential"
-                className="min-h-28 w-full bg-[var(--color-secondary)] px-3 py-2 text-sm"
                 value={credential}
-                onChange={(event) => setCredential(event.target.value)}
+                onChange={setCredential}
+                saveKey={saveKey}
+                onSaveKeyChange={setSaveKey}
+                keyName={keyName}
+                onKeyNameChange={setKeyName}
                 required
               />
             )}

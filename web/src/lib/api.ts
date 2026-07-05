@@ -92,6 +92,16 @@ export interface CopyServerInput {
   group_id?: string | null;
 }
 
+export interface UpdateServerInput {
+  name?: string;
+  host?: string;
+  port?: number;
+  username?: string;
+  auth_type?: "password" | "private_key";
+  credential?: string;
+  group_id?: string | null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -123,6 +133,11 @@ export const api = {
   copyServer: (sourceId: string, input: CopyServerInput) =>
     request<{ server: Server }>(`/api/v1/servers/${sourceId}/copy`, {
       method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateServer: (id: string, input: UpdateServerInput) =>
+    request<{ server: Server }>(`/api/v1/servers/${id}`, {
+      method: "PUT",
       body: JSON.stringify(input),
     }),
   createGroup: (input: { name: string; parent_id?: string | null }) =>

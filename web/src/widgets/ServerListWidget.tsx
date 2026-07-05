@@ -58,6 +58,7 @@ export function ServerListWidget({
   onAddGroup,
   onRenameGroup,
   onCopyServer,
+  onEditServer,
   expanded,
   onExpandedChange,
 }: ServerListWidgetProps) {
@@ -219,6 +220,11 @@ export function ServerListWidget({
       onSelect: () => context.onSelectServer(id),
     });
     items.push({
+      id: "edit",
+      label: t("serverList.edit"),
+      onSelect: () => onEditServer(id),
+    });
+    items.push({
       id: "copy",
       label: t("serverList.copy"),
       onSelect: () => onCopyServer(id),
@@ -230,7 +236,7 @@ export function ServerListWidget({
       onSelect: () => onDeleteServer(id),
     });
     return items;
-  }, [menu, context, collapseAll, expandAll, onAddGroup, onAddServer, onCopyServer, onDeleteGroup, onDeleteServer, onRenameGroup, t]);
+  }, [menu, context, collapseAll, expandAll, onAddGroup, onAddServer, onCopyServer, onDeleteGroup, onDeleteServer, onEditServer, onRenameGroup, t]);
 
   const canDrop = (item: DragItem, intent: DropIntent): boolean => {
     if (item.type === "group" && intent.kind === "into" && item.id === intent.groupId) {

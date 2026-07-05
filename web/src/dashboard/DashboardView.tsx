@@ -25,6 +25,7 @@ import { AddGroupDialog } from "./AddGroupDialog";
 import { AddQuickCommandDialog } from "./AddQuickCommandDialog";
 import { AddServerDialog } from "./AddServerDialog";
 import { CopyServerDialog } from "./CopyServerDialog";
+import { EditServerDialog } from "./EditServerDialog";
 import { RenameGroupDialog } from "./RenameGroupDialog";
 import { StatusSettingsDialog } from "./StatusSettingsDialog";
 import { AddWidgetMenu } from "./AddWidgetMenu";
@@ -92,6 +93,8 @@ export function DashboardView() {
   const [addGroupId, setAddGroupId] = useState<string | null>(null);
   const [copyOpen, setCopyOpen] = useState(false);
   const [copySource, setCopySource] = useState<Server | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editServer, setEditServer] = useState<Server | null>(null);
   const [groupOpen, setGroupOpen] = useState(false);
   const [groupParentId, setGroupParentId] = useState<string | null>(null);
   const [renameOpen, setRenameOpen] = useState(false);
@@ -771,6 +774,12 @@ export function DashboardView() {
                   setCopySource(source);
                   setCopyOpen(true);
                 }}
+                onEditServer={(serverId) => {
+                  const target = findServerInTree(tree, serverId);
+                  if (!target) return;
+                  setEditServer(target);
+                  setEditOpen(true);
+                }}
               />
             );
           }
@@ -874,6 +883,16 @@ export function DashboardView() {
         }}
         source={copySource}
         onCopied={load}
+      />
+
+      <EditServerDialog
+        open={editOpen}
+        onOpenChange={(open) => {
+          setEditOpen(open);
+          if (!open) setEditServer(null);
+        }}
+        server={editServer}
+        onUpdated={load}
       />
 
       <AddGroupDialog

@@ -29,6 +29,7 @@ export interface ServerListWidgetProps extends WidgetProps {
   onAddGroup: (parentId: string | null) => void;
   onRenameGroup: (groupId: string, name: string) => void;
   onCopyServer: (serverId: string) => void;
+  onEditServer: (serverId: string) => void;
   expanded: Set<string>;
   onExpandedChange: Dispatch<SetStateAction<Set<string>>>;
 }
