@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="web/public/favicon-dark.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="web/public/favicon-light.svg" />
-    <img src="web/public/favicon-light.svg" alt="ternssh logo" width="96" height="96" />
+    <source media="(prefers-color-scheme: dark)" srcset="web/public/logo-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="web/public/logo-light.png" />
+    <img src="web/public/logo-light.png" alt="ternssh logo" width="96" height="93" />
   </picture>
 </p>
 
@@ -271,9 +271,11 @@ docker run -d \
 ```
 ternssh/
 ├── web/                    # 前端（React + Vite）
-│   ├── public/favicon-light.svg  # Logo（亮色）
-│   ├── public/favicon-dark.svg   # Logo（暗色）
-│   ├── public/logo.png           # 顶栏 PNG 备用
+│   ├── public/logo-light.png     # Logo（亮色）
+│   ├── public/logo-dark.png      # Logo（暗色）
+│   ├── public/logo.png           # Logo 源文件
+│   ├── public/favicon-light.png  # Favicon（亮色）
+│   ├── public/favicon-dark.png   # Favicon（暗色）
 │   └── src/
 │       ├── components/     # UI、设置、凭据字段、CodeEditor
 │       ├── dashboard/      # 网格布局、对话框
