@@ -1,6 +1,5 @@
 import type { Locale } from "@/i18n/locales/index";
 import { detectBrowserLocale } from "@/i18n/locales/index";
-import { SITE_NAME_STORAGE_KEY } from "@/lib/site-name";
 import {
   BACKGROUND_STORAGE_KEY,
   GRID_MARGIN_STORAGE_KEY,
@@ -14,7 +13,6 @@ export const TERMINAL_HISTORY_STORAGE_KEY = "ternssh-terminal-history";
 
 export const APP_SETTINGS_STORAGE_KEYS = [
   LOCALE_STORAGE_KEY,
-  SITE_NAME_STORAGE_KEY,
   THEME_STORAGE_KEY,
   BACKGROUND_STORAGE_KEY,
   WIDGET_OPACITY_STORAGE_KEY,

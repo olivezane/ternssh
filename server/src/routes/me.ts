@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { getAuthMode } from "../auth/identity";
+import { SITE_NAME_MAX_LENGTH } from "../db/site-name";
 import { resetUserData } from "../db/reset-user-data";
+import { updateUserSiteName } from "../db/users";
 import type { Variables } from "../types";
 
 export const meRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -11,6 +13,40 @@ meRoutes.get("/", async (c) => {
     user,
     authMode: await getAuthMode(c.env),
   });
+});
+
+meRoutes.put("/site-name", async (c) => {
+  const user = c.get("user");
+  const body = (await c.req.json().catch(() => null)) as {
+    siteName?: unknown;
+  } | null;
+
+  if (typeof body?.siteName !== "string") {
+    return c.json({ error: "Site name must be a string" }, 400);
+  }
+
+  if (body.siteName.trim().length > SITE_NAME_MAX_LENGTH) {
+    return c.json(
+      {
+        error: `Site name must be at most ${SITE_NAME_MAX_LENGTH} characters`,
+      },
+      400,
+    );
+  }
+
+  try {
+    const updated = await updateUserSiteName(c.env.DB, user.id, body.siteName);
+    return c.json({ user: updated });
+  } catch (error) {
+    console.error("update site name failed", error);
+    return c.json(
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to update site name",
+      },
+      500,
+    );
+  }
 });
 
 meRoutes.post("/reset", async (c) => {

@@ -1,4 +1,5 @@
 import { resetDefaultDashboard, type DashboardWithWidgets } from "./dashboards";
+import { resetUserSiteName } from "./users";
 
 async function tableExists(db: D1Database, name: string): Promise<boolean> {
   const row = await db
@@ -43,5 +44,6 @@ export async function resetUserData(
       .run();
   }
 
+  await resetUserSiteName(db, userId);
   return resetDefaultDashboard(db, userId);
 }

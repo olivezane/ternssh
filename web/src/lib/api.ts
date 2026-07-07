@@ -4,6 +4,7 @@ export interface User {
   id: string;
   email: string | null;
   display_name: string | null;
+  site_name: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -146,6 +147,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getMe: () => request<MeResponse>("/api/v1/me"),
+  updateSiteName: (siteName: string) =>
+    request<{ user: User }>("/api/v1/me/site-name", {
+      method: "PUT",
+      body: JSON.stringify({ siteName }),
+    }),
   getAuthCredentials: () =>
     request<{ username: string }>("/api/v1/auth/credentials"),
   updateAuthCredentials: (input: UpdateAuthCredentialsInput) =>
