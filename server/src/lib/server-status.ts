@@ -81,9 +81,42 @@ export function parseProcessLimitParam(
   return clampProcessLimit(parsed);
 }
 
-function buildProcessListCommand(processLimit: number): string {
+function buildProcessMetricsCommand(processLimit: number): string {
   const limit = clampProcessLimit(processLimit);
-  return `ps aux --sort=-%cpu 2>/dev/null | awk 'NR>1 && NR<=${limit + 1} {name=$11; for(i=12;i<=NF;i++) name=name" "$i; if(length(name)>48) name=substr(name,1,48); gsub(/\\|/,"/",name); print "PROC:"$2"|"$1"|"$3"|"$4"|"$6"|"$8"|"name}'`;
+  // One ps pass: awk keeps top-N by CPU without ps --sort scanning/sorting every process twice.
+  return `ps -eo pid=,user=,pcpu=,pmem=,rss=,stat=,args= --no-headers 2>/dev/null | awk -v limit=${limit} '
+{
+  proccnt++
+  name=$7
+  for (i=8; i<=NF; i++) name=name" "$i
+  if (length(name)>48) name=substr(name,1,48)
+  gsub(/\\|/, "/", name)
+  pcpu=$3+0
+  line=$1"|"$2"|"$3"|"$4"|"$5"|"$6"|"name
+  if (n<limit) {
+    n++
+    slot[n]=line
+    cpu[n]=pcpu
+    next
+  }
+  min=1
+  for (i=2; i<=n; i++) if (cpu[i]<cpu[min]) min=i
+  if (pcpu<=cpu[min]) next
+  slot[min]=line
+  cpu[min]=pcpu
+}
+END {
+  print "PROCCNT:" proccnt+0
+  for (i=1; i<n; i++) {
+    for (j=i+1; j<=n; j++) {
+      if (cpu[j]>cpu[i]) {
+        tmp=cpu[i]; cpu[i]=cpu[j]; cpu[j]=tmp
+        tmp=slot[i]; slot[i]=slot[j]; slot[j]=tmp
+      }
+    }
+  }
+  for (i=1; i<=n; i++) print "PROC:" slot[i]
+}'`;
 }
 
 export function buildStatusCommand(
@@ -98,8 +131,7 @@ export function buildStatusCommand(
     'awk \'$1 ~ /:/ {gsub(/:/,"",$1); if ($1!="lo") print "IF:"$1" "$2" "$10}\' /proc/net/dev 2>/dev/null',
     'echo "UPTIME:$(cut -d" " -f1 /proc/uptime 2>/dev/null)"',
     'echo "OS:$(uname -sr 2>/dev/null)"',
-    'echo "PROCCNT:$(ps -eo pid= 2>/dev/null | wc -l | tr -d " ")"',
-    buildProcessListCommand(processLimit),
+    buildProcessMetricsCommand(processLimit),
   ].join("; ");
 }
 

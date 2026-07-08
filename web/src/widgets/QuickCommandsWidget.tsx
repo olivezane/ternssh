@@ -54,8 +54,8 @@ const PRESET_GROUPS: PresetCommandGroup[] = [
   {
     titleKey: "quickCommands.preset.processes",
     commands: [
-      { labelKey: "topMem", command: "ps aux --sort=-%mem | head -10" },
-      { labelKey: "topCpu", command: "ps aux --sort=-%cpu | head -10" },
+      { labelKey: "topMem", command: "ps -eo pid,user,pcpu,pmem,rss,stat,args --sort=-pmem 2>/dev/null | head -11" },
+      { labelKey: "topCpu", command: "ps -eo pid,user,pcpu,pmem,rss,stat,args --sort=-pcpu 2>/dev/null | head -11" },
     ],
   },
   {
