@@ -22,6 +22,7 @@ import {
   countTreeNodes,
   DRAG_MIME,
   filterTreeBySearch,
+  findServerInTree,
   flattenTree,
   isGroupDescendant,
   readDragItem,
@@ -233,6 +234,15 @@ export function ServerListWidget({
       onSelect: () => onEditServer(id),
     });
     items.push({
+      id: "copy-host",
+      label: t("serverList.copyHost"),
+      onSelect: () => {
+        const server = findServerInTree(tree, id);
+        if (!server) return;
+        void navigator.clipboard.writeText(server.host);
+      },
+    });
+    items.push({
       id: "copy",
       label: t("serverList.copy"),
       onSelect: () => onCopyServer(id),
@@ -244,7 +254,7 @@ export function ServerListWidget({
       onSelect: () => onDeleteServer(id),
     });
     return items;
-  }, [menu, context, collapseAll, expandAll, onAddGroup, onAddServer, onCopyServer, onDeleteGroup, onDeleteServer, onEditServer, onRenameGroup, t]);
+  }, [menu, context, collapseAll, expandAll, onAddGroup, onAddServer, onCopyServer, onDeleteGroup, onDeleteServer, onEditServer, onRenameGroup, t, tree]);
 
   const canDrop = (item: DragItem, intent: DropIntent): boolean => {
     if (item.type === "group" && intent.kind === "into" && item.id === intent.groupId) {

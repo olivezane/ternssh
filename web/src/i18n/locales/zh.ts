@@ -180,6 +180,7 @@ export const zh = {
     select: "选择",
     delete: "删除",
     copy: "复制",
+    copyHost: "复制主机",
     edit: "编辑",
     dragSort: "拖拽排序",
     dropToRoot: "拖到此处移至根目录",

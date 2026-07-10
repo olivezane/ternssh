@@ -191,6 +191,7 @@ export const en: Messages = {
     select: "Select",
     delete: "Delete",
     copy: "Duplicate",
+    copyHost: "Copy host",
     edit: "Edit",
     dragSort: "Drag to reorder",
     dropToRoot: "Drop here to move to root",
