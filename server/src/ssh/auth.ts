@@ -296,19 +296,18 @@ export class SSHAuth {
 
     // PKCS#8: SEQUENCE { version, algorithmIdentifier, privateKey }
     if (der[0] !== 0x30) throw new Error('PKCS#8 格式损坏');
-    const seqLen = derLength(der, 1);
-    let pos = seqLen.end;
+    let pos = derLength(der, 1).end;
 
     // version INTEGER 0
     const ver = derReadInteger(der, pos); pos = ver.end;
 
-    // algorithmIdentifier SEQUENCE
+    // algorithmIdentifier SEQUENCE — skip it, read OID from first item
     const algoSeq = derReadSequence(der, pos); pos = algoSeq.end;
 
     // Extract OID from algorithmIdentifier
     const { oid } = derReadOid(algoSeq.items[0], 0);
 
-    // privateKey OCTET STRING (contains inner key data)
+    // privateKey OCTET STRING
     const privOctet = derReadOctetString(der, pos);
 
     if (oid === '1.3.101.112') {
@@ -327,60 +326,20 @@ export class SSHAuth {
   }
 
   private static async buildEd25519FromSeed(seed: Uint8Array): Promise<KeyMaterial> {
-    const pkcs8 = this.buildEd25519PKCS8(seed);
-    const signingKey = await crypto.subtle.importKey('pkcs8', pkcs8, { name: 'Ed25519' }, false, ['sign']);
-
-    // Ed25519 public key = last 32 bytes of expanded key, derive from seed
-    // Web Crypto doesn't expose raw pubkey from private import, so we derive it
-    // by signing a dummy message and using the fact that Ed25519 public key is deterministic
-    // Actually, we can compute it: pubkey = scalarmult_base(seed)
-    // But Web Crypto doesn't expose this. We need to manually compute the SSH blob.
-    // For Ed25519, the OpenSSH format stores pubkey explicitly. For PKCS#8, we need to derive it.
-    // The only way is to use the full private key (seed + pubkey) format or compute via Web Crypto.
-
-    // Workaround: export the private key as JWK (not supported for Ed25519 in all runtimes)
-    // Alternative: use the fact that the 32-byte seed IS the Ed25519 private key
-    // and the public key can be derived. In Cloudflare Workers, we can use noble-ed25519 or similar.
-    // BUT: we don't want to add dependencies.
-
-    // Best approach: PKCS#8 for Ed25519 typically includes the full 64-byte key (seed+pubkey)
-    // in some implementations. Let's check if the inner sequence has two items.
-    // If only seed (32 bytes), we can't derive pubkey without a pure-CPU implementation.
-
-    // Actually, re-reading the PKCS#8 Ed25519 spec (RFC 8410):
-    // The private key is just the 32-byte seed. The public key must be computed.
-    // Since we can't compute Ed25519 scalar multiplication in pure JS without a library,
-    // and adding a dependency violates YAGNI...
-    // BUT: we CAN use Web Crypto to sign and then extract... no, that doesn't work.
-
-    // OK, pragmatic solution: use @noble/ed25519 which is already bundled in some CF workers.
-    // Actually no, we don't have it. Let's check if we can export as JWK.
-    // Cloudflare Workers Web Crypto DOES support exporting Ed25519 keys as JWK with the raw field.
-
-    // Let's try a different approach: the standard PKCS#8 for Ed25519 in practice often uses
-    // the full 64-byte format. But RFC 8410 says 32 bytes. Let's handle both.
+    // PKCS#8 Ed25519 only contains the 32-byte seed; public key must be computed
+    // via scalar multiplication which requires a dedicated library.
+    // Use OpenSSH format instead: ssh-keygen -t ed25519
     throw new Error('PKCS#8 Ed25519 需要公钥，请使用 OpenSSH 格式 (ssh-keygen -t ed25519)');
   }
 
   private static async buildRsaFromPkcs8(innerData: Uint8Array, fullDer: Uint8Array): Promise<KeyMaterial> {
     // Parse RSA private key from inner PKCS#1 DER
-    // PKCS#1 RSAPrivateKey: SEQUENCE { n, e, d, p, q, dp, dq, iqmp }
+    // PKCS#1 RSAPrivateKey: SEQUENCE { version, n, e, d, p, q, dp, dq, iqmp }
     if (innerData[0] !== 0x30) throw new Error('RSA 私钥格式损坏');
-    const seq = derReadSequence(innerData, 0);
-    if (seq.items.length < 8) throw new Error('RSA 私钥字段不足');
+    const bodyStart = derLength(innerData, 1).end;
 
-    const n = derReadInteger(innerData, derSkipTagAndLen(innerData, 0)); // first item
-    // Actually, let's just read them in order from seq.items
-    // seq.items[i] already contains the raw value bytes
-    // But wait, my derReadSequence stores either full nested SEQUENCE or value bytes
-    // For INTEGER, items[i] = value bytes. For nested SEQUENCE, items[i] = full TLV.
-
-    // Let me re-parse properly
-    let pos = seq.end - seq.items.reduce((s, item) => s + item.length, 0); // rewind
-    // Actually this is getting complicated. Let me just re-read from innerData.
-
-    // Simpler: read each INTEGER sequentially
-    const nInt = derReadInteger(innerData, 0);
+    const ver = derReadInteger(innerData, bodyStart);
+    const nInt = derReadInteger(innerData, ver.end);
     const eInt = derReadInteger(innerData, nInt.end);
     const dInt = derReadInteger(innerData, eInt.end);
     const pInt = derReadInteger(innerData, dInt.end);
@@ -402,8 +361,10 @@ export class SSHAuth {
 
     // PKCS#1 RSAPrivateKey: SEQUENCE { version, n, e, d, p, q, dp, dq, iqmp }
     if (der[0] !== 0x30) throw new Error('PKCS#1 RSA 格式损坏');
+    const bodyStart = derLength(der, 1).end;
 
-    const nInt = derReadInteger(der, 0);
+    const ver = derReadInteger(der, bodyStart);
+    const nInt = derReadInteger(der, ver.end);
     const eInt = derReadInteger(der, nInt.end);
     const dInt = derReadInteger(der, eInt.end);
     const pInt = derReadInteger(der, dInt.end);
@@ -643,10 +604,4 @@ export class SSHAuth {
         throw new Error(`Unexpected auth message type: ${msgType}`);
     }
   }
-}
-
-function derSkipTagAndLen(data: Uint8Array, offset: number): number {
-  offset++; // skip tag
-  const li = derLength(data, offset);
-  return li.end;
 }
