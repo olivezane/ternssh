@@ -425,9 +425,9 @@ export class SSHAuth {
     if (!sshCurve) throw new Error(`不支持的 EC 曲线 OID: ${curveOid}`);
 
     // Web Crypto EC import
-    const ecParams = this.ecCurveParams(sshCurve);
+    const { hash: _hash, ...ecImportParams } = this.ecCurveParams(sshCurve);
     const pkcs8 = this.buildEcPKCS8(privKey.value, pubPoint, curveOid);
-    const signingKey = await crypto.subtle.importKey('pkcs8', pkcs8, ecParams, false, ['sign']);
+    const signingKey = await crypto.subtle.importKey('pkcs8', pkcs8, ecImportParams, false, ['sign']);
 
     const publicKeyBlob = concat(
       encodeString('ecdsa-sha2-' + sshCurve),
@@ -547,9 +547,9 @@ export class SSHAuth {
 
   private static ecCurveParams(sshCurve: string) {
     switch (sshCurve) {
-      case 'nistp256': return { name: 'ECDSA' as const, namedCurve: 'P-256' as const };
-      case 'nistp384': return { name: 'ECDSA' as const, namedCurve: 'P-384' as const };
-      case 'nistp521': return { name: 'ECDSA' as const, namedCurve: 'P-521' as const };
+      case 'nistp256': return { name: 'ECDSA' as const, namedCurve: 'P-256' as const, hash: 'SHA-256' as const };
+      case 'nistp384': return { name: 'ECDSA' as const, namedCurve: 'P-384' as const, hash: 'SHA-384' as const };
+      case 'nistp521': return { name: 'ECDSA' as const, namedCurve: 'P-521' as const, hash: 'SHA-512' as const };
       default: throw new Error(`不支持的 EC 曲线: ${sshCurve}`);
     }
   }

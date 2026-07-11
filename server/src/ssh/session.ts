@@ -896,31 +896,44 @@ export class SSHSession {
         rawSig,
         exchangeHash
       );
-    } else if (keyType === 'ecdsa-sha2-nistp256') {
-      // Parse ECDSA key
+    } else if (keyType.startsWith('ecdsa-sha2-')) {
+      // RFC 5656 §3.1: key blob = string "ecdsa-sha2-[id]" || string [id] || string Q
       const curveLen = (hostKeyBlob[offset] << 24) | (hostKeyBlob[offset+1] << 16) |
                        (hostKeyBlob[offset+2] << 8) | hostKeyBlob[offset+3];
+      const curveId = this.textDecoder.decode(hostKeyBlob.subarray(offset + 4, offset + 4 + curveLen));
       offset += 4 + curveLen;
       const rawKeyLen = (hostKeyBlob[offset] << 24) | (hostKeyBlob[offset+1] << 16) |
                         (hostKeyBlob[offset+2] << 8) | hostKeyBlob[offset+3];
       offset += 4;
       const rawKey = hostKeyBlob.subarray(offset, offset + rawKeyLen);
-      this.sendDebug(`ECDSA public key: ${rawKey.length} bytes`);
+      this.sendDebug(`ECDSA curve: ${curveId}, public key: ${rawKey.length} bytes`);
+
+      // RFC 5656 §6.2.1: hash algorithm by curve size
+      let namedCurve: 'P-256' | 'P-384' | 'P-521';
+      let hashAlgo: string;
+      let fieldSize: number;
+      switch (curveId) {
+        case 'nistp256': namedCurve = 'P-256'; hashAlgo = 'SHA-256'; fieldSize = 32; break;
+        case 'nistp384': namedCurve = 'P-384'; hashAlgo = 'SHA-384'; fieldSize = 48; break;
+        case 'nistp521': namedCurve = 'P-521'; hashAlgo = 'SHA-512'; fieldSize = 66; break;
+        default:
+          this.sendDebug(`Unsupported ECDSA curve: ${curveId}`);
+          return null;
+      }
 
       const pubKey = await crypto.subtle.importKey(
         'raw',
         rawKey,
-        { name: 'ECDSA', namedCurve: 'P-256' },
+        { name: 'ECDSA', namedCurve },
         false,
         ['verify']
       );
 
-      // Convert SSH DER signature to raw r||s format for Web Crypto
-      const ecdsaRawSig = this.convertSSHECDSASig(rawSig);
-      this.sendDebug(`ECDSA raw sig: ${ecdsaRawSig.length} bytes`);
+      const ecdsaRawSig = this.convertSSHECDSASig(rawSig, fieldSize);
+      this.sendDebug(`ECDSA raw sig: ${ecdsaRawSig.length} bytes, hash: ${hashAlgo}`);
 
       return await crypto.subtle.verify(
-        { name: 'ECDSA', hash: 'SHA-256' },
+        { name: 'ECDSA', hash: hashAlgo },
         pubKey,
         ecdsaRawSig,
         exchangeHash
@@ -991,7 +1004,7 @@ export class SSHSession {
     return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
-  private convertSSHECDSASig(sshSig: Uint8Array): Uint8Array {
+  private convertSSHECDSASig(sshSig: Uint8Array, fieldSize: number): Uint8Array {
     // SSH ECDSA sig is: string r, string s (each mpint)
     let offset = 0;
     const rLen = (sshSig[offset] << 24) | (sshSig[offset+1] << 16) |
@@ -1005,13 +1018,13 @@ export class SSHSession {
     let s = sshSig.subarray(offset, offset + sLen);
 
     // Strip leading zero bytes (mpint sign extension)
-    if (r.length > 32 && r[0] === 0) r = r.subarray(1);
-    if (s.length > 32 && s[0] === 0) s = s.subarray(1);
+    if (r.length > fieldSize && r[0] === 0) r = r.subarray(1);
+    if (s.length > fieldSize && s[0] === 0) s = s.subarray(1);
 
-    // Pad to 32 bytes each
-    const result = new Uint8Array(64);
-    result.set(r, 32 - r.length);
-    result.set(s, 64 - s.length);
+    // Pad to fieldSize bytes each
+    const result = new Uint8Array(fieldSize * 2);
+    result.set(r, fieldSize - r.length);
+    result.set(s, fieldSize * 2 - s.length);
     return result;
   }
 
