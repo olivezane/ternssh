@@ -147,7 +147,7 @@ export class SSHAuth {
       encodeString('ssh-connection'),
       encodeString('publickey'),
       new Uint8Array([0x01]),
-      encodeString(keyType),
+      encodeString(keyType === 'ssh-rsa' ? sigType : keyType),
       encodeString(publicKeyBlob),
     );
 
