@@ -467,8 +467,8 @@ export class SSHAuth {
 
     const publicKeyBlob = concat(
       encodeString('ssh-rsa'),
-      encodeString(this.stripLeadingZero(e)),
-      encodeString(this.stripLeadingZero(n)),
+      encodeString(this.toSSHMpint(e)),
+      encodeString(this.toSSHMpint(n)),
     );
 
     return { signingKey: await signingKey, publicKeyBlob, keyType: 'ssh-rsa' };
@@ -501,6 +501,20 @@ export class SSHAuth {
   private static stripLeadingZero(bytes: Uint8Array): Uint8Array {
     let start = 0;
     while (start < bytes.length - 1 && bytes[start] === 0) start++;
+    return bytes.slice(start);
+  }
+
+  /**
+   * Convert to SSH mpint format: strip unnecessary leading zeros but preserve
+   * a leading 0x00 if the high bit of the next byte is set (prevents negative interpretation).
+   */
+  private static toSSHMpint(bytes: Uint8Array): Uint8Array {
+    let start = 0;
+    while (start < bytes.length - 1 && bytes[start] === 0) start++;
+    // If high bit is set, keep one leading zero to mark as positive
+    if (start < bytes.length && (bytes[start] & 0x80) !== 0 && start > 0) {
+      start--;
+    }
     return bytes.slice(start);
   }
 
