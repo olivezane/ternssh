@@ -255,7 +255,7 @@ export class SftpClient {
           remotePath,
           onProgress,
         );
-        triggerBrowserDownload(new Blob([bytes]), filename);
+        triggerBrowserDownload(new Blob([bytes.buffer as ArrayBuffer]), filename);
         onProgress?.({ loaded: bytes.byteLength, total: bytes.byteLength });
       });
     const result = this.downloadChain.then(run);
@@ -296,7 +296,7 @@ export class SftpClient {
     onProgress?: (progress: SftpUploadProgress) => void,
   ): Promise<void> {
     const bytes = encodeFileContent(content);
-    const file = new File([bytes], remotePath.split("/").pop() || "file", {
+    const file = new File([bytes.buffer as ArrayBuffer], remotePath.split("/").pop() || "file", {
       type: "text/plain",
     });
     return this.upload(remotePath, file, onProgress);
@@ -374,7 +374,7 @@ export class SftpClient {
         };
       });
 
-      const blob = new Blob(this.downloadChunks);
+      const blob = new Blob(this.downloadChunks.map((c) => c.buffer as ArrayBuffer));
       const bytes = new Uint8Array(await blob.arrayBuffer());
       onProgress?.({ loaded: bytes.byteLength, total: total || bytes.byteLength });
       return { bytes, filename };
@@ -493,7 +493,7 @@ export class SftpClient {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("SFTP 未连接");
     }
-    this.ws.send(data);
+    this.ws.send(data.buffer as ArrayBuffer);
   }
 
   private async handleMessage(data: string | Blob | ArrayBuffer): Promise<void> {

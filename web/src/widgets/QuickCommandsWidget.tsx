@@ -181,7 +181,7 @@ export function QuickCommandsWidget({
         return;
       }
 
-      const ok = runTerminalCommand(session.sessionId, command);
+      const ok = runTerminalCommand(session!.sessionId, command);
       if (!ok) {
         setError(t("quickCommands.sendFailed"));
         return;
