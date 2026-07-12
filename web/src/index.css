@@ -313,6 +313,18 @@ html[data-has-background="true"] .grid-dashboard-host {
   touch-action: none;
 }
 
+.server-list-widget,
+.file-manager-widget {
+  user-select: none;
+}
+
+.server-list-widget input,
+.server-list-widget textarea,
+.file-manager-widget input,
+.file-manager-widget textarea {
+  user-select: text;
+}
+
 .terminal-widget-host {
   background: transparent;
 }

@@ -578,7 +578,7 @@ export function FileManagerWidget({
 
   return (
     <div
-      className="relative flex h-full min-h-0 flex-col"
+      className="file-manager-widget relative flex h-full min-h-0 flex-col"
       onDragEnter={(event) => {
         event.preventDefault();
         if (!ready || uploading || downloading || loading) return;

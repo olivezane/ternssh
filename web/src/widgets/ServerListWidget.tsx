@@ -392,7 +392,7 @@ export function ServerListWidget({
   return (
     <>
       <div
-        className="widget-no-drag flex h-full flex-col overflow-hidden p-2"
+        className="server-list-widget widget-no-drag flex h-full flex-col overflow-hidden p-2"
         onContextMenu={(event) => openContextMenu(event, { kind: "root" })}
         onDragOver={isSearching ? undefined : handleRootDragOver}
         onDrop={
