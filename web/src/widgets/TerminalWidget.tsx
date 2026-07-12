@@ -367,7 +367,12 @@ function SessionPane({
         return false;
       }
 
-      if (currentSuggestions.length > 0 && event.key === "ArrowDown") {
+      if (
+        currentSuggestions.length > 0 &&
+        event.key === "ArrowDown" &&
+        suggestionIndex > 0 &&
+        suggestionIndex < currentSuggestions.length - 1
+      ) {
         event.preventDefault();
         setActiveSuggestionIndex((index) =>
           Math.min(index + 1, currentSuggestions.length - 1),
