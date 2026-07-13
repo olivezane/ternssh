@@ -65,11 +65,16 @@ interface PendingExec {
 const LOCAL_WINDOW_ADJUST_THRESHOLD = 512 * 1024;
 const KEEPALIVE_REQUEST_NAME = new TextEncoder().encode('keepalive@openssh.com');
 
+interface SftpWebSocketState {
+  handler: SFTPHandler | null;
+  taskQueue: Promise<void>;
+}
+
 export class SSHSession {
   private readonly textEncoder = new TextEncoder();
   private readonly textDecoder = new TextDecoder();
   private ws: WebSocket;
-  private sftpWs: WebSocket | null = null;
+  private sftpConnections = new Map<WebSocket, SftpWebSocketState>();
   private socket: any;
   private config: SSHConnectionConfig;
   private strictHostKeyVerify: boolean;
@@ -80,11 +85,9 @@ export class SSHSession {
   private channels: Map<number, SSHChannel> = new Map();
   private shellChannel: SSHChannel;
   private nextChannelID: number = 1; // Start from 1, shellChannel uses 0
-  private sftpHandler: SFTPHandler | null = null;
   private pendingExec: PendingExec | null = null;
   private execChain: Promise<void> = Promise.resolve();
   private readonly execOnly: boolean;
-  private sftpTaskQueue: Promise<void> = Promise.resolve();
   private encryptCipher: SSHAESGCMCipher | SSHAESCTRCipher | null = null;
   private decryptCipher: SSHAESGCMCipher | SSHAESCTRCipher | null = null;
   private encryptMac: SSHHMAC | null = null;
@@ -166,20 +169,20 @@ export class SSHSession {
   }
 
   attachSFTPWebSocket(ws: WebSocket): void {
-    if (this.sftpWs && this.sftpWs !== ws) {
-      try { this.sftpWs.close(1000, 'Replaced by new SFTP WebSocket'); } catch (e) { this.sendDebug(() => `Close old SFTP ws: ${e instanceof Error ? e.message : e}`); }
+    if (!this.sftpConnections.has(ws)) {
+      this.sftpConnections.set(ws, {
+        handler: null,
+        taskQueue: Promise.resolve(),
+      });
     }
-    this.sftpWs = ws;
     try { ws.send(JSON.stringify({ type: 'sftp_socket_ready' })); } catch (e) { this.sendDebug(() => `Send sftp_socket_ready failed: ${e instanceof Error ? e.message : e}`); }
   }
 
   detachSFTPWebSocket(ws: WebSocket, closeChannel: boolean = true): void {
-    if (this.sftpWs === ws) {
-      this.sftpWs = null;
-      if (closeChannel) {
-        this.closeSFTPChannel();
-      }
+    if (closeChannel) {
+      this.closeSFTPChannel(ws);
     }
+    this.sftpConnections.delete(ws);
   }
 
   isSSHReady(): boolean {
@@ -1155,13 +1158,13 @@ export class SSHSession {
           return;
         }
         channel.handleOpenConfirmation(payload);
-        this.sendDebug(`CHANNEL_OPEN_CONFIRMATION: channelID=${channelID}, remoteChannelID=${channel.getRemoteChannelID()}, isSFTP=${this.sftpHandler && channelID === this.sftpHandler.getChannelID()}`);
+        this.sendDebug(`CHANNEL_OPEN_CONFIRMATION: channelID=${channelID}, remoteChannelID=${channel.getRemoteChannelID()}, isSFTP=${Boolean(this.findSftpConnectionByChannelID(channelID))}`);
 
         if (channel === this.shellChannel) {
           // Shell channel: send PTY request
           const ptyReq = channel.buildPTYRequest(this.terminalSize.cols, this.terminalSize.rows);
           await this.sendEncrypted(ptyReq);
-        } else if (this.sftpHandler && channelID === this.sftpHandler.getChannelID()) {
+        } else if (this.findSftpConnectionByChannelID(channelID)) {
           // SFTP channel: send subsystem request
           this.sendDebug(`SFTP channel confirmed, sending subsystem request`);
           const subsystemReq = channel.buildSubsystemRequest('sftp');
@@ -1184,11 +1187,13 @@ export class SSHSession {
 
         this.channels.delete(channelID);
 
-        if (this.sftpHandler && channelID === this.sftpHandler.getChannelID()) {
+        const sftpConnection = this.findSftpConnectionByChannelID(channelID);
+        if (sftpConnection) {
           // SFTP channel open failed - notify frontend, don't close terminal
           this.sendDebug(`SFTP channel open failed: reason=${reasonCode}, desc=${description}`);
-          this.sendSFTPError('init', '服务器不支持 SFTP: ' + description);
-          this.sftpHandler = null;
+          this.sendSFTPErrorTo(sftpConnection.ws, 'init', '服务器不支持 SFTP: ' + description);
+          sftpConnection.state.handler?.dispose();
+          sftpConnection.state.handler = null;
         } else if (this.pendingExec && channelID === this.pendingExec.channelID) {
           this.failExec(new Error(description || 'Exec 通道打开失败'));
         } else if (channelID === this.shellChannel.getLocalChannelID()) {
@@ -1220,15 +1225,17 @@ export class SSHSession {
           }
           this.state = 'ready';
           this.sendStatus('Shell 已就绪');
-        } else if (this.sftpHandler && channelID === this.sftpHandler.getChannelID()) {
+        } else if (this.findSftpConnectionByChannelID(channelID)) {
           // SFTP subsystem request confirmed - send SFTP init
           this.sendDebug(`SFTP CHANNEL_SUCCESS received, calling onSubsystemReady`);
-          const handler = this.sftpHandler;
+          const sftpConnection = this.findSftpConnectionByChannelID(channelID);
+          if (!sftpConnection) break;
+          const handler = sftpConnection.handler;
           void handler.onSubsystemReady().catch((error) => {
             const errMsg = error instanceof Error ? error.message : String(error);
             this.sendDebug(`SFTP onSubsystemReady ERROR: ${errMsg}`);
-            if (this.sftpHandler === handler) {
-              this.sendSFTPError('init', 'SFTP 初始化失败: ' + errMsg);
+            if (sftpConnection.state.handler === handler) {
+              this.sendSFTPErrorTo(sftpConnection.ws, 'init', 'SFTP 初始化失败: ' + errMsg);
             }
           });
         }
@@ -1237,10 +1244,11 @@ export class SSHSession {
 
       case SSH_MSG_CHANNEL_FAILURE: {
         const channelID = this.getChannelIDFromPayload(payload);
-        if (this.sftpHandler && channelID === this.sftpHandler.getChannelID()) {
-          this.sendSFTPError('init', 'SFTP subsystem 请求被拒绝');
-          this.sftpHandler.dispose();
-          this.sftpHandler = null;
+        const sftpConnection = this.findSftpConnectionByChannelID(channelID);
+        if (sftpConnection) {
+          this.sendSFTPErrorTo(sftpConnection.ws, 'init', 'SFTP subsystem 请求被拒绝');
+          sftpConnection.state.handler?.dispose();
+          sftpConnection.state.handler = null;
         } else if (this.pendingExec && channelID === this.pendingExec.channelID) {
           this.failExec(new Error('Exec 请求被拒绝'));
         } else if (this.state === 'shell' || this.state === 'shell-requested') {
@@ -1275,16 +1283,19 @@ export class SSHSession {
             this.sendDebug(() => `Send shell output failed: ${e instanceof Error ? e.message : e}`);
           }
           this.queueLocalWindowAdjust(outputData.length, channel);
-        } else if (this.sftpHandler && channelID === this.sftpHandler.getChannelID()) {
-          // SFTP channel data - forward to SFTP handler
-          const sftpData = channel.handleChannelData(payload);
-          this.sendDebug(() => `SFTP CHANNEL_DATA received: channelID=${channelID}, dataLen=${sftpData.length}, firstByte=${sftpData[0]}`);
-          this.sftpHandler.onChannelData(sftpData);
-          this.queueLocalWindowAdjust(sftpData.length, channel);
-        } else if (this.pendingExec && channelID === this.pendingExec.channelID) {
-          const outputData = channel.handleChannelData(payload);
-          this.pendingExec.stdout.push(outputData);
-          this.queueLocalWindowAdjust(outputData.length, channel);
+        } else {
+          const sftpConnection = this.findSftpConnectionByChannelID(channelID);
+          if (sftpConnection) {
+            // SFTP channel data - forward to SFTP handler
+            const sftpData = channel.handleChannelData(payload);
+            this.sendDebug(() => `SFTP CHANNEL_DATA received: channelID=${channelID}, dataLen=${sftpData.length}, firstByte=${sftpData[0]}`);
+            sftpConnection.handler.onChannelData(sftpData);
+            this.queueLocalWindowAdjust(sftpData.length, channel);
+          } else if (this.pendingExec && channelID === this.pendingExec.channelID) {
+            const outputData = channel.handleChannelData(payload);
+            this.pendingExec.stdout.push(outputData);
+            this.queueLocalWindowAdjust(outputData.length, channel);
+          }
         }
         break;
       }
@@ -1327,8 +1338,9 @@ export class SSHSession {
           channel.handleWindowAdjust(payload);
           if (channel === this.shellChannel) {
             void this.flushChannelDataQueue();
-          } else if (this.sftpHandler && channelID === this.sftpHandler.getChannelID()) {
-            this.sftpHandler.onWindowAdjust();
+          } else {
+            const sftpConnection = this.findSftpConnectionByChannelID(channelID);
+            sftpConnection?.handler.onWindowAdjust();
           }
         }
         break;
@@ -1347,9 +1359,8 @@ export class SSHSession {
         } else {
           // Other channel (SFTP etc.) EOF - don't close connection
           this.sendDebug(`Non-shell channel EOF: channelID=${channelID}`);
-          if (this.sftpHandler && channelID === this.sftpHandler.getChannelID()) {
-            this.sftpHandler.onChannelEof();
-          }
+          const sftpConnection = this.findSftpConnectionByChannelID(channelID);
+          sftpConnection?.handler.onChannelEof();
         }
         break;
       }
@@ -1366,11 +1377,14 @@ export class SSHSession {
           } else {
             this.channels.delete(channelID);
           }
-        } else if (this.sftpHandler && channelID === this.sftpHandler.getChannelID()) {
-          this.sftpHandler.onChannelClosed();
         } else {
-          this.sendDebug(`Non-shell channel closed: channelID=${channelID}`);
-          this.channels.delete(channelID);
+          const sftpConnection = this.findSftpConnectionByChannelID(channelID);
+          if (sftpConnection) {
+            sftpConnection.handler.onChannelClosed();
+          } else {
+            this.sendDebug(`Non-shell channel closed: channelID=${channelID}`);
+            this.channels.delete(channelID);
+          }
         }
         break;
       }
@@ -1439,125 +1453,133 @@ export class SSHSession {
     }
   }
 
-  async handleSFTPWebSocketMessage(data: string | ArrayBuffer): Promise<void> {
+  async handleSFTPWebSocketMessage(ws: WebSocket, data: string | ArrayBuffer): Promise<void> {
     if (typeof data === 'string') {
       let parsed: any;
       try {
         parsed = JSON.parse(data);
       } catch {
-        this.sendSFTPError('protocol', 'Invalid SFTP message format');
+        this.sendSFTPErrorTo(ws, 'protocol', 'Invalid SFTP message format');
         return;
       }
 
       if (parsed?.type === 'ping') {
-        this.sendSFTPJSON({ type: 'pong' });
+        this.sendSFTPJSONTo(ws, { type: 'pong' });
         return;
       }
 
       if (!parsed?.type || !parsed.type.startsWith('sftp_')) {
-        this.sendSFTPError('protocol', 'Invalid SFTP message type');
+        this.sendSFTPErrorTo(ws, 'protocol', 'Invalid SFTP message type');
         return;
       }
 
       if (parsed.type === 'sftp_download_cancel') {
-        this.sftpHandler?.cancelDownload();
+        this.getSftpState(ws)?.handler?.cancelDownload();
         return;
       }
 
       if (parsed.type === 'sftp_upload_cancel') {
-        void this.sftpHandler?.uploadCancel();
+        void this.getSftpState(ws)?.handler?.uploadCancel();
         return;
       }
 
-      this.enqueueSFTPTask(this.getSFTPOperation(parsed.type), () => this.handleSFTPMessage(parsed));
+      this.enqueueSFTPTask(ws, this.getSFTPOperation(parsed.type), () =>
+        this.handleSFTPMessage(ws, parsed),
+      );
       return;
     }
 
-    if (!this.sftpHandler) {
-      this.sendSFTPError('upload', 'SFTP 未初始化，请先发送 sftp_init');
+    const handler = this.getSftpState(ws)?.handler;
+    if (!handler) {
+      this.sendSFTPErrorTo(ws, 'upload', 'SFTP 未初始化，请先发送 sftp_init');
       return;
     }
 
     const chunk = new Uint8Array(data);
-    this.enqueueSFTPTask('upload', async () => {
-      if (!this.sftpHandler) {
-        this.sendSFTPError('upload', 'SFTP 未初始化');
+    this.enqueueSFTPTask(ws, 'upload', async () => {
+      const currentHandler = this.getSftpState(ws)?.handler;
+      if (!currentHandler) {
+        this.sendSFTPErrorTo(ws, 'upload', 'SFTP 未初始化');
         return;
       }
-      await this.sftpHandler.onUploadChunk(chunk);
+      await currentHandler.onUploadChunk(chunk);
     });
   }
 
-  private async handleSFTPMessage(msg: any): Promise<void> {
+  private async handleSFTPMessage(ws: WebSocket, msg: any): Promise<void> {
     if (this.state !== 'ready') {
-      this.sendSFTPError(this.getSFTPOperation(msg.type), 'SSH 连接未就绪');
+      this.sendSFTPErrorTo(ws, this.getSFTPOperation(msg.type), 'SSH 连接未就绪');
       return;
     }
 
     if (msg.type === 'sftp_init') {
-      await this.openSFTPChannel();
+      await this.openSFTPChannel(ws);
       return;
     }
 
-    if (!this.sftpHandler) {
-      this.sendSFTPError(this.getSFTPOperation(msg.type), 'SFTP 未初始化，请先发送 sftp_init');
+    const handler = this.getSftpState(ws)?.handler;
+    if (!handler) {
+      this.sendSFTPErrorTo(ws, this.getSFTPOperation(msg.type), 'SFTP 未初始化，请先发送 sftp_init');
       return;
     }
 
     switch (msg.type) {
       case 'sftp_list':
-        await this.sftpHandler.listDirectory(msg.path || '.');
+        await handler.listDirectory(msg.path || '.');
         break;
       case 'sftp_stat':
-        await this.sftpHandler.stat(msg.path);
+        await handler.stat(msg.path);
         break;
       case 'sftp_download':
-        await this.sftpHandler.downloadFile(msg.path);
+        await handler.downloadFile(msg.path);
         break;
       case 'sftp_download_cancel':
-        this.sftpHandler.cancelDownload();
+        handler.cancelDownload();
         break;
       case 'sftp_upload_start':
-        await this.sftpHandler.uploadStart(msg.path, msg.size || 0);
+        await handler.uploadStart(msg.path, msg.size || 0);
         break;
       case 'sftp_upload_end':
-        await this.sftpHandler.uploadEnd();
+        await handler.uploadEnd();
         break;
       case 'sftp_upload_cancel':
-        await this.sftpHandler.uploadCancel();
+        await handler.uploadCancel();
         break;
       case 'sftp_delete':
-        await this.sftpHandler.deletePath(msg.path);
+        await handler.deletePath(msg.path);
         break;
       case 'sftp_rename':
-        await this.sftpHandler.renamePath(msg.oldPath, msg.newPath);
+        await handler.renamePath(msg.oldPath, msg.newPath);
         break;
       case 'sftp_mkdir':
-        await this.sftpHandler.makeDirectory(msg.path);
+        await handler.makeDirectory(msg.path);
         break;
       case 'sftp_rmdir':
-        await this.sftpHandler.removeDirectory(msg.path);
+        await handler.removeDirectory(msg.path);
         break;
       case 'sftp_close':
-        this.closeSFTPChannel();
+        this.closeSFTPChannel(ws);
         break;
     }
   }
 
-  private async openSFTPChannel(): Promise<void> {
-    if (this.sftpHandler) {
-      if (this.sftpHandler.isReady()) {
-        this.sendSFTPJSON({ type: 'sftp_ready' });
-        return;
-      }
-      this.closeSFTPChannel();
+  private async openSFTPChannel(ws: WebSocket): Promise<void> {
+    const state = this.getOrCreateSftpState(ws);
+
+    if (state.handler?.isReady()) {
+      this.sendSFTPJSONTo(ws, { type: 'sftp_ready' });
+      return;
+    }
+
+    if (state.handler) {
+      this.closeSFTPChannel(ws);
     }
 
     const channelID = this.nextChannelID++;
     const sftpChannel = new SSHChannel();
     this.channels.set(channelID, sftpChannel);
 
-    this.sftpHandler = new SFTPHandler(
+    state.handler = new SFTPHandler(
       channelID,
       sftpChannel,
       (payload: Uint8Array) => {
@@ -1566,17 +1588,17 @@ export class SSHSession {
       },
       (msg: any) => {
         this.sendDebug(() => `SFTP sendJSON: type=${msg.type}`);
-        this.sendSFTPJSON(msg);
+        this.sendSFTPJSONTo(ws, msg);
       },
       (data: Uint8Array) => {
         this.sendDebug(() => `SFTP sendBinary: len=${data.length}`);
-        this.sendSFTPBinary(data);
+        this.sendSFTPBinaryTo(ws, data);
       },
       (message: string) => {
         this.sendDebug(message);
       },
       this.debugMode,
-      () => this.finalizeSftpHandler(),
+      () => this.finalizeSftpHandler(ws),
     );
 
     const openMsg = sftpChannel.buildOpenSession(channelID);
@@ -1584,16 +1606,95 @@ export class SSHSession {
     this.sendDebug(`SFTP channel open requested, channelID=${channelID}, channels count=${this.channels.size}`);
   }
 
-  private enqueueSFTPTask(operation: string, task: () => Promise<void> | void): void {
-    const run = this.sftpTaskQueue.then(async () => {
+  private enqueueSFTPTask(
+    ws: WebSocket,
+    operation: string,
+    task: () => Promise<void> | void,
+  ): void {
+    const state = this.getOrCreateSftpState(ws);
+    const run = state.taskQueue.then(async () => {
       await task();
     });
 
-    this.sftpTaskQueue = run.catch((error) => {
+    state.taskQueue = run.catch((error) => {
       const errMsg = error instanceof Error ? error.message : String(error);
       this.sendDebug(`SFTP task ERROR: ${errMsg}`);
-      this.sendSFTPError(operation, 'SFTP 操作失败: ' + errMsg);
+      this.sendSFTPErrorTo(ws, operation, 'SFTP 操作失败: ' + errMsg);
     });
+  }
+
+  private getOrCreateSftpState(ws: WebSocket): SftpWebSocketState {
+    const existing = this.sftpConnections.get(ws);
+    if (existing) return existing;
+
+    const created: SftpWebSocketState = {
+      handler: null,
+      taskQueue: Promise.resolve(),
+    };
+    this.sftpConnections.set(ws, created);
+    return created;
+  }
+
+  private getSftpState(ws: WebSocket): SftpWebSocketState | undefined {
+    return this.sftpConnections.get(ws);
+  }
+
+  private findSftpConnectionByChannelID(
+    channelID: number,
+  ): { ws: WebSocket; state: SftpWebSocketState; handler: SFTPHandler } | null {
+    for (const [ws, state] of this.sftpConnections) {
+      if (state.handler?.getChannelID() === channelID) {
+        return { ws, state, handler: state.handler };
+      }
+    }
+    return null;
+  }
+
+  private sendSFTPErrorTo(ws: WebSocket, operation: string, message: string): void {
+    this.sendSFTPJSONTo(ws, { type: 'sftp_error', operation, message });
+  }
+
+  private sendSFTPJSONTo(ws: WebSocket, msg: any): void {
+    const payload = JSON.stringify(msg);
+    try {
+      ws.send(payload);
+    } catch {
+      this.sftpConnections.delete(ws);
+    }
+  }
+
+  private sendSFTPBinaryTo(ws: WebSocket, data: Uint8Array): void {
+    try {
+      ws.send(data);
+    } catch {
+      this.sftpConnections.delete(ws);
+    }
+  }
+
+  private closeSFTPChannel(ws: WebSocket): void {
+    const state = this.sftpConnections.get(ws);
+    if (!state?.handler) return;
+
+    const channelID = state.handler.getChannelID();
+    const channel = this.channels.get(channelID);
+
+    if (channel && !channel.isClosed()) {
+      const eof = channel.buildEof();
+      const close = channel.buildClose();
+      void this.sendEncrypted(eof).then(() => this.sendEncrypted(close)).catch(() => {});
+    }
+
+    this.finalizeSftpHandler(ws);
+  }
+
+  private finalizeSftpHandler(ws: WebSocket): void {
+    const state = this.sftpConnections.get(ws);
+    if (!state?.handler) return;
+
+    const channelID = state.handler.getChannelID();
+    state.handler.dispose();
+    state.handler = null;
+    this.channels.delete(channelID);
   }
 
   private sendSFTPAttachUrl(): void {
@@ -1629,59 +1730,6 @@ export class SSHSession {
       default:
         return 'protocol';
     }
-  }
-
-  private sendSFTPError(operation: string, message: string): void {
-    this.sendSFTPJSON({ type: 'sftp_error', operation, message });
-  }
-
-  private sendSFTPJSON(msg: any): void {
-    const payload = JSON.stringify(msg);
-    if (this.sftpWs) {
-      try {
-        this.sftpWs.send(payload);
-        return;
-      } catch {
-        this.sftpWs = null;
-      }
-    }
-  }
-
-  private sendSFTPBinary(data: Uint8Array): void {
-    if (this.sftpWs) {
-      try {
-        this.sftpWs.send(data);
-        return;
-      } catch {
-        this.sftpWs = null;
-      }
-    }
-
-    this.sendDebug('SFTP binary dropped because SFTP WebSocket is not connected');
-  }
-
-  private closeSFTPChannel(): void {
-    if (!this.sftpHandler) return;
-
-    const channelID = this.sftpHandler.getChannelID();
-    const channel = this.channels.get(channelID);
-
-    if (channel && !channel.isClosed()) {
-      const eof = channel.buildEof();
-      const close = channel.buildClose();
-      void this.sendEncrypted(eof).then(() => this.sendEncrypted(close)).catch(() => {});
-    }
-
-    this.finalizeSftpHandler();
-  }
-
-  private finalizeSftpHandler(): void {
-    if (!this.sftpHandler) return;
-
-    const channelID = this.sftpHandler.getChannelID();
-    this.sftpHandler.dispose();
-    this.sftpHandler = null;
-    this.channels.delete(channelID);
   }
 
   private enqueueChannelData(data: Uint8Array): void {
@@ -1827,10 +1875,11 @@ export class SSHSession {
       clearTimeout(this.shellReadyTimeout);
       this.shellReadyTimeout = null;
     }
-    if (this.sftpHandler) {
-      this.sftpHandler.dispose();
-      this.sftpHandler = null;
+    for (const [ws] of this.sftpConnections) {
+      this.closeSFTPChannel(ws);
+      try { ws.close(normal ? 1000 : 1011); } catch (e) { this.sendDebug(() => `Close SFTP ws: ${e instanceof Error ? e.message : e}`); }
     }
+    this.sftpConnections.clear();
     if (this.pendingExec) {
       this.failExec(new Error('SSH 会话已关闭'));
     }
@@ -1841,8 +1890,6 @@ export class SSHSession {
     try { this.socketWriter?.releaseLock(); } catch (e) { this.sendDebug(() => `Release socket writer lock: ${e instanceof Error ? e.message : e}`); }
     this.socketWriter = null;
     try { this.socket.close(); } catch (e) { this.sendDebug(() => `Close TCP socket: ${e instanceof Error ? e.message : e}`); }
-    try { this.sftpWs?.close(normal ? 1000 : 1011); } catch (e) { this.sendDebug(() => `Close SFTP ws: ${e instanceof Error ? e.message : e}`); }
-    this.sftpWs = null;
     try { this.ws.close(normal ? 1000 : 1011); } catch (e) { this.sendDebug(() => `Close SSH ws: ${e instanceof Error ? e.message : e}`); }
   }
 }

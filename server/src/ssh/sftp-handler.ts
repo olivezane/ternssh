@@ -22,7 +22,6 @@ import {
 const DOWNLOAD_CHUNK_SIZE = 128 * 1024;
 const DOWNLOAD_CONCURRENCY = 8;
 const DOWNLOAD_PROGRESS_CHUNKS = 8;
-const UPLOAD_PROGRESS_CHUNKS = 8;
 const SFTP_WRITE_MAX = 32 * 1024;
 const MAX_SFTP_FILE_SIZE = 500 * 1024 * 1024; // 500MB limit
 
@@ -52,7 +51,6 @@ export class SFTPHandler {
   private uploadHandle: Uint8Array | null = null;
   private uploadOffset: number = 0;
   private uploadBytesWritten: number = 0;
-  private uploadChunksSinceProgress: number = 0;
   private uploadTotalSize: number = 0;
   private uploadPath: string = '';
   private uploadWritePromises: Set<Promise<void>> = new Set();
@@ -182,7 +180,6 @@ export class SFTPHandler {
     this.uploadHandle = null;
     this.uploadOffset = 0;
     this.uploadBytesWritten = 0;
-    this.uploadChunksSinceProgress = 0;
     this.uploadTotalSize = 0;
     this.uploadPath = '';
     this.uploadWritePromises.clear();
@@ -625,6 +622,7 @@ export class SFTPHandler {
     }
 
     const handle = this.uploadHandle;
+    const writes: Promise<void>[] = [];
     let sourceOffset = 0;
 
     while (sourceOffset < data.length) {
@@ -632,39 +630,41 @@ export class SFTPHandler {
       const piece = data.subarray(sourceOffset, sourceOffset + pieceLength);
       const writeOffset = this.uploadOffset;
       this.uploadOffset += pieceLength;
-
-      const writePromise = (async () => {
-        const resp = await this.sftp.writeFile(handle, writeOffset, piece);
-        const type = resp[0];
-
-        if (type === SSH_FXP_STATUS) {
-          const status = this.sftp.parseStatusResponse(resp);
-          if (status.code !== SSH_FX_OK) {
-            throw new Error(status.message);
-          }
-        } else {
-          throw new Error('SFTP 写入响应异常');
-        }
-
-        this.uploadBytesWritten += pieceLength;
-        this.uploadChunksSinceProgress++;
-
-        if (
-          this.uploadTotalSize > 0 &&
-          (this.uploadChunksSinceProgress >= UPLOAD_PROGRESS_CHUNKS ||
-            this.uploadBytesWritten >= this.uploadTotalSize)
-        ) {
-          this.sendJSON({
-            type: 'sftp_upload_progress',
-            loaded: this.uploadBytesWritten,
-            total: this.uploadTotalSize,
-          });
-          this.uploadChunksSinceProgress = 0;
-        }
-      })();
-
-      await this.trackUploadWrite(writePromise);
       sourceOffset += pieceLength;
+
+      writes.push(
+        this.trackUploadWrite(
+          (async () => {
+            const resp = await this.sftp.writeFile(handle, writeOffset, piece);
+            const type = resp[0];
+
+            if (type === SSH_FXP_STATUS) {
+              const status = this.sftp.parseStatusResponse(resp);
+              if (status.code !== SSH_FX_OK) {
+                throw new Error(status.message);
+              }
+            } else {
+              throw new Error('SFTP 写入响应异常');
+            }
+
+            this.uploadBytesWritten += pieceLength;
+          })(),
+        ),
+      );
+    }
+
+    await Promise.all(writes);
+
+    if (this.uploadError) {
+      throw this.uploadError;
+    }
+
+    if (this.uploadTotalSize > 0) {
+      this.sendJSON({
+        type: 'sftp_upload_progress',
+        loaded: this.uploadBytesWritten,
+        total: this.uploadTotalSize,
+      });
     }
 
     this.sendJSON({
@@ -695,7 +695,7 @@ export class SFTPHandler {
         `上传大小不匹配 (${this.uploadBytesWritten}/${this.uploadTotalSize})`,
       );
     } else {
-      if (this.uploadTotalSize > 0 && this.uploadChunksSinceProgress > 0) {
+      if (this.uploadTotalSize > 0) {
         this.sendJSON({
           type: 'sftp_upload_progress',
           loaded: this.uploadBytesWritten,

@@ -20,7 +20,8 @@ export type SftpClientStatus =
 
 export const MAX_SFTP_FILE_SIZE = 500 * 1024 * 1024;
 export const MAX_SFTP_TEXT_EDIT_SIZE = 2 * 1024 * 1024;
-const UPLOAD_CHUNK_SIZE = 32 * 1024;
+const UPLOAD_CHUNK_SIZE = 128 * 1024;
+const UPLOAD_PIPELINE_DEPTH = 4;
 
 export interface SftpUploadProgress {
   loaded: number;
@@ -243,6 +244,7 @@ export class SftpClient {
       // ignore
     }
     this.uploadProgressHandler = null;
+    this.rejectAll(new Error("上传已取消"));
   }
 
   async download(
@@ -409,17 +411,29 @@ export class SftpClient {
     };
 
     try {
-      let offset = 0;
-      while (offset < total) {
-        const chunk = file.slice(offset, offset + UPLOAD_CHUNK_SIZE);
+      let fileOffset = 0;
+      let pendingAcks = 0;
+
+      const sendChunk = async () => {
+        const chunk = file.slice(fileOffset, fileOffset + UPLOAD_CHUNK_SIZE);
         const buffer = await chunk.arrayBuffer();
         const chunkBytes = new Uint8Array(buffer);
-        const nextOffset = offset + chunkBytes.byteLength;
         this.sendBinary(chunkBytes);
+        fileOffset += chunkBytes.byteLength;
+        pendingAcks += 1;
+      };
+
+      while (fileOffset < total || pendingAcks > 0) {
+        while (fileOffset < total && pendingAcks < UPLOAD_PIPELINE_DEPTH) {
+          await sendChunk();
+        }
+
+        if (pendingAcks === 0) break;
 
         const ackMessage = await this.waitFor(
           (item) =>
             item.type === "sftp_upload_chunk_ack" ||
+            item.type === "sftp_upload_cancelled" ||
             item.type === "sftp_error",
           120_000,
           "上传数据块超时",
@@ -427,14 +441,13 @@ export class SftpClient {
         if (ackMessage.type === "sftp_error") {
           throw new Error(String(ackMessage.message ?? "上传失败"));
         }
-
-        const loaded = Number(ackMessage.loaded ?? 0);
-        if (loaded < nextOffset) {
-          throw new Error("上传数据块确认异常");
+        if (ackMessage.type === "sftp_upload_cancelled") {
+          throw new Error("上传已取消");
         }
 
-        offset = nextOffset;
-        onProgress?.({ loaded: offset, total });
+        pendingAcks -= 1;
+        const loaded = Number(ackMessage.loaded ?? 0);
+        onProgress?.({ loaded, total });
       }
 
       this.send({ type: "sftp_upload_end" });

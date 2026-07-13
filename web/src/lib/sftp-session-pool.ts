@@ -22,6 +22,15 @@ export async function acquireSftpClient(
   return client;
 }
 
+/** Dedicated SFTP connection for a single upload; caller must disconnect when done. */
+export async function createEphemeralSftpClient(
+  sftpWsUrl: string,
+): Promise<SftpClient> {
+  const client = new SftpClient();
+  await client.connect(sftpWsUrl);
+  return client;
+}
+
 export function getSftpClient(sessionId: string): SftpClient | null {
   const client = clients.get(sessionId);
   return client?.connected ? client : null;

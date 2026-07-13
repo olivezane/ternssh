@@ -265,6 +265,7 @@ export const zh = {
     colModified: "修改时间",
     emptyDir: "目录为空",
     uploading: "正在上传 {name}",
+    uploadingBatch: "正在上传 {current}/{total} 个文件",
     downloading: "正在下载 {name}",
     uploadingStatus: "{path} · 上传中",
     downloadingStatus: "{path} · 下载中",

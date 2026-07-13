@@ -34,9 +34,11 @@ import {
 } from "@/lib/sftp-client";
 import {
   acquireSftpClient,
+  createEphemeralSftpClient,
   releaseSftpClient,
 } from "@/lib/sftp-session-pool";
 import { cn } from "@/lib/utils";
+import { formatBitrate } from "@/lib/server-status";
 
 const FileEditorDialog = lazy(() =>
   import("@/widgets/FileEditorDialog").then((module) => ({
@@ -59,6 +61,7 @@ interface UploadState {
   name: string;
   loaded: number;
   total: number;
+  bytesPerSecond: number;
 }
 
 interface TransferState {
@@ -73,10 +76,37 @@ interface EditorTarget {
 }
 
 const TEXT_EDIT_SIZE_LABEL = "2 MB";
+const UPLOAD_FILE_CONCURRENCY = 4;
 
 function formatUploadProgress(loaded: number, total: number): string {
   if (total <= 0) return "0%";
   return `${Math.min(100, Math.round((loaded / total) * 100))}%`;
+}
+
+function computeTransferSpeed(loaded: number, startedAt: number): number {
+  const elapsed = (Date.now() - startedAt) / 1000;
+  if (elapsed < 0.5 || loaded <= 0) return 0;
+  return loaded / elapsed;
+}
+
+async function runConcurrent<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  if (items.length === 0) return;
+
+  let index = 0;
+  const runners = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (index < items.length) {
+        const current = items[index++];
+        await worker(current);
+      }
+    },
+  );
+  await Promise.all(runners);
 }
 
 async function ensureRemoteDirectories(
@@ -136,7 +166,9 @@ export function FileManagerWidget({
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const dragDepthRef = useRef(0);
   const uploadClientRef = useRef<SftpClient | null>(null);
+  const activeUploadClientsRef = useRef<Set<SftpClient>>(new Set());
   const uploadCancelledRef = useRef(false);
+  const uploadStartedAtRef = useRef(0);
 
   const sortedEntries = useMemo(() => sortSftpEntries(entries), [entries]);
   const selectedEntry = useMemo(
@@ -388,65 +420,129 @@ export function FileManagerWidget({
   const handleCancelUpload = useCallback(() => {
     uploadCancelledRef.current = true;
     uploadClientRef.current?.cancelUpload();
+    for (const client of activeUploadClientsRef.current) {
+      client.cancelUpload();
+    }
   }, []);
 
   const uploadLocalItems = useCallback(
     async (items: { file: File; relativePath: string }[]) => {
-      if (!isActive() || !ready || !clientRef.current || items.length === 0) {
+      if (!isActive() || !ready || !clientRef.current || !session || items.length === 0) {
         return;
       }
 
-      const client = clientRef.current;
+      const browseClient = clientRef.current;
+      const { sftpWsUrl } = session;
       uploadCancelledRef.current = false;
-      uploadClientRef.current = client;
+      uploadClientRef.current = null;
+      activeUploadClientsRef.current.clear();
+      uploadStartedAtRef.current = Date.now();
       setUploading(true);
       setError(null);
       createdDirsRef.current = new Set();
 
+      const fileProgress = new Map<string, { loaded: number; total: number }>();
+      for (const item of items) {
+        fileProgress.set(item.relativePath, {
+          loaded: 0,
+          total: item.file.size,
+        });
+      }
+
+      let completedFiles = 0;
+
+      const updateBatchProgress = () => {
+        let loaded = 0;
+        let total = 0;
+        for (const progress of fileProgress.values()) {
+          loaded += progress.loaded;
+          total += progress.total;
+        }
+
+        const activeCount = items.filter((item) => {
+          const progress = fileProgress.get(item.relativePath);
+          return progress && progress.loaded < progress.total;
+        }).length;
+
+        const label =
+          items.length === 1
+            ? t("fileManager.uploading", { name: items[0]!.relativePath })
+            : t("fileManager.uploadingBatch", {
+                current: completedFiles + activeCount,
+                total: items.length,
+              });
+
+        setUploadState({
+          name: label,
+          loaded,
+          total,
+          bytesPerSecond: computeTransferSpeed(
+            loaded,
+            uploadStartedAtRef.current,
+          ),
+        });
+      };
+
       try {
         for (const item of items) {
           if (!isActive() || uploadCancelledRef.current) return;
-
-          const targetPath = joinRemotePath(remotePath, item.relativePath);
           await ensureRemoteDirectories(
-            client,
+            browseClient,
             remotePath,
             item.relativePath,
             createdDirsRef.current,
           );
-
-          setUploadState({
-            name: item.relativePath,
-            loaded: 0,
-            total: item.file.size,
-          });
-
-          await client.upload(targetPath, item.file, (progress) => {
-            if (!isActive() || uploadCancelledRef.current) return;
-            setUploadState({
-              name: item.relativePath,
-              loaded: progress.loaded,
-              total: progress.total,
-            });
-          });
-
-          if (uploadCancelledRef.current) return;
         }
+
+        updateBatchProgress();
+
+        await runConcurrent(items, UPLOAD_FILE_CONCURRENCY, async (item) => {
+          if (!isActive() || uploadCancelledRef.current) return;
+
+          const uploadClient = await createEphemeralSftpClient(sftpWsUrl);
+          activeUploadClientsRef.current.add(uploadClient);
+
+          try {
+            const targetPath = joinRemotePath(remotePath, item.relativePath);
+            await uploadClient.upload(targetPath, item.file, (progress) => {
+              if (!isActive() || uploadCancelledRef.current) return;
+              fileProgress.set(item.relativePath, progress);
+              updateBatchProgress();
+            });
+
+            if (uploadCancelledRef.current) return;
+
+            fileProgress.set(item.relativePath, {
+              loaded: item.file.size,
+              total: item.file.size,
+            });
+            completedFiles += 1;
+            updateBatchProgress();
+          } finally {
+            activeUploadClientsRef.current.delete(uploadClient);
+            uploadClient.disconnect();
+          }
+        });
 
         if (!isActive() || uploadCancelledRef.current) return;
         await loadDirectory(remotePath);
       } catch (err) {
         if (!isActive() || uploadCancelledRef.current) return;
+        uploadCancelledRef.current = true;
+        for (const client of activeUploadClientsRef.current) {
+          client.cancelUpload();
+        }
         setError(err instanceof Error ? err.message : t("fileManager.uploadFailed"));
       } finally {
         uploadClientRef.current = null;
+        activeUploadClientsRef.current.clear();
         if (isActive()) {
           setUploading(false);
           setUploadState(null);
         }
       }
     },
-    [isActive, ready, remotePath, loadDirectory, t],
+    [isActive, ready, remotePath, loadDirectory, session, t],
   );
 
   const handleDrop = useCallback(
@@ -725,11 +821,12 @@ export function FileManagerWidget({
       {uploadState && (
         <div className="border-b border-[var(--color-border)] px-3 py-2">
           <div className="flex items-center justify-between gap-2 text-[11px]">
-            <span className="truncate">
-              {t("fileManager.uploading", { name: uploadState.name })}
-            </span>
+            <span className="truncate">{uploadState.name}</span>
             <span className="shrink-0 text-[var(--color-muted-foreground)]">
               {formatUploadProgress(uploadState.loaded, uploadState.total)}
+              {uploadState.bytesPerSecond > 0 && (
+                <> · {formatBitrate(uploadState.bytesPerSecond)}</>
+              )}
             </span>
           </div>
           <div className="mt-1 flex items-center gap-2">

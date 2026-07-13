@@ -277,6 +277,7 @@ export const en: Messages = {
     colModified: "Modified",
     emptyDir: "Empty directory",
     uploading: "Uploading {name}",
+    uploadingBatch: "Uploading {current}/{total} files",
     downloading: "Downloading {name}",
     uploadingStatus: "{path} · Uploading",
     downloadingStatus: "{path} · Downloading",

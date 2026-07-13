@@ -152,7 +152,7 @@ export class SshSession extends DurableObject<Env> {
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
     if (this.sftpSockets.has(ws)) {
-      await this.sshSession?.handleSFTPWebSocketMessage(message);
+      await this.sshSession?.handleSFTPWebSocketMessage(ws, message);
       return;
     }
 
