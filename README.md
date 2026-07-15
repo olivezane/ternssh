@@ -39,4 +39,33 @@
 
 ## 部署
 
+### Docker 一键启动
+
+使用预构建镜像（推荐）：
+
+```bash
+docker run -d \
+  --name ternssh \
+  -p 8787:8787 \
+  -v ternssh-data:/app/.wrangler \
+  --restart unless-stopped \
+  ghcr.io/haradakashiwa/ternssh:latest
+```
+
+或使用 Docker Compose：
+
+```bash
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+从源码构建：
+
+```bash
+docker compose up -d --build
+```
+
+启动后访问 http://localhost:8787。如需启用 Cloudflare Access 认证，可添加环境变量 `ACCESS_TEAM_DOMAIN` 与 `ACCESS_AUD`。
+
+### Cloudflare Workers
+
 详见 [部署指南](https://ternssh.com/docs/deployment)。
