@@ -25,9 +25,6 @@ import {
   buildCompletionPayload,
   findTerminalSuggestions,
   pushTerminalHistory,
-  resolveInputPartial,
-  shouldSyncDraftFromEcho,
-  syncDraftFromTerminal,
 } from "@/lib/terminal-suggestions";
 import { cn } from "@/lib/utils";
 import type { SessionCloseReason, TerminalWidgetProps } from "./types";
@@ -153,20 +150,10 @@ function SessionPane({
     setActiveSuggestionIndex(0);
   };
 
-  const readInputState = () => {
-    const terminal = terminalRef.current;
-    const draft = draftRef.current;
-    if (!terminal) {
-      return draft;
-    }
-    return resolveInputPartial(terminal, draft);
-  };
-
   const applySuggestion = (suggestion: string) => {
-    const terminal = terminalRef.current;
     const ws = wsRef.current;
-    if (!terminal || !ws || ws.readyState !== WebSocket.OPEN) return;
-    const partial = readInputState();
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const partial = draftRef.current;
     const completion = buildCompletionPayload(partial, suggestion);
     if (!completion) return;
     ws.send(completion.payload);
@@ -327,13 +314,6 @@ function SessionPane({
           return;
         }
         terminal.write(data);
-        if (shouldSyncDraftFromEcho(data)) {
-          const prev = draftRef.current;
-          draftRef.current = syncDraftFromTerminal(terminal, draftRef.current);
-          if (draftRef.current !== prev) {
-            updateSuggestions(draftRef.current);
-          }
-        }
       })();
     };
 
@@ -397,8 +377,7 @@ function SessionPane({
         !event.altKey &&
         !event.metaKey
       ) {
-        const current = readInputState();
-        draftRef.current = current;
+        const current = draftRef.current;
         const matches = findTerminalSuggestions(session.serverId, current);
         if (matches.length === 0) return true;
 
