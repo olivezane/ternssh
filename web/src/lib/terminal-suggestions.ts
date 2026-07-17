@@ -84,20 +84,33 @@ export function pushTerminalHistory(serverId: string, command: string): void {
   writeStore(store);
 }
 
-function readLineText(terminal: Terminal): string {
+function readLineTextToCursor(terminal: Terminal): string {
   const buffer = terminal.buffer.active;
   const row = buffer.getLine(buffer.baseY + buffer.cursorY);
   if (!row) return "";
 
   let text = "";
-  for (let x = 0; x < row.length; x++) {
+  for (let x = 0; x < buffer.cursorX; x++) {
     text += row.getCell(x)?.getChars() ?? "";
   }
   return text.replace(/\s+$/g, "");
 }
 
 function extractCommandTail(line: string): string {
-  const markers = ["$ ", "# ", "> ", "❯ ", "➜ ", "λ "];
+  const markers = [
+    "$ ",
+    "# ",
+    "% ",
+    "> ",
+    "❯ ",
+    "➜ ",
+    "λ ",
+    "] ",
+    "» ",
+    "› ",
+    "✗ ",
+    "✔ ",
+  ];
   let start = 0;
   for (const marker of markers) {
     const index = line.lastIndexOf(marker);
@@ -107,7 +120,7 @@ function extractCommandTail(line: string): string {
   }
 
   // Prompts like root@host:~# often omit the trailing space after $ or #.
-  const endPrompt = line.match(/[$#](?:\s*)?$/);
+  const endPrompt = line.match(/[$#%](?:\s*)?$/);
   if (endPrompt?.index !== undefined) {
     const cut = endPrompt.index + endPrompt[0].length;
     if (cut > start) {
@@ -119,46 +132,28 @@ function extractCommandTail(line: string): string {
 }
 
 export function readTerminalPartialCommand(terminal: Terminal): string {
-  return extractCommandTail(readLineText(terminal));
+  return extractCommandTail(readLineTextToCursor(terminal));
+}
+
+function stripBracketedPaste(input: string): string {
+  if (input.startsWith("\x1b[200~")) {
+    return input.slice("\x1b[200~".length).replace(/\x1b\[201~[\s\S]*$/, "");
+  }
+  if (input.includes("\x1b[201~")) {
+    return input.replace(/\x1b\[201~[\s\S]*$/, "");
+  }
+  return input;
 }
 
 /** Apply a single onData payload to the local input draft (echo may arrive later). */
 export function applyInputToDraft(draft: string, input: string): string {
-  if (input.includes("\r") || input === "\n") return "";
-  if (input === "\x7f" || input === "\x08") return draft.slice(0, -1);
-  if (input === "\x15" || input === "\x03") return "";
-  if (input.startsWith("\x1b") || input === "\t") return draft;
-  if (/[\x00-\x1f\x7f]/.test(input)) return draft;
-  return draft + input;
-}
-
-/** Prefer local draft when ahead of echo; never regress to a shorter buffer. */
-export function resolveInputPartial(
-  terminal: Terminal | null,
-  draft: string,
-): string {
-  if (!terminal) return draft;
-  const fromBuffer = readTerminalPartialCommand(terminal);
-  if (!fromBuffer) return draft;
-  if (!draft) return fromBuffer;
-  if (draft === fromBuffer) return draft;
-  if (draft.startsWith(fromBuffer)) return draft;
-  if (fromBuffer.startsWith(draft)) return fromBuffer;
-  return draft;
-}
-
-/** Reconcile local draft with the terminal buffer after server echo. */
-export function syncDraftFromTerminal(
-  terminal: Terminal,
-  draft: string,
-): string {
-  return resolveInputPartial(terminal, draft);
-}
-
-/** True when WebSocket output is likely prompt/input echo, not bulk command output. */
-export function shouldSyncDraftFromEcho(data: string): boolean {
-  if (data.startsWith("\x1b")) return true;
-  return !data.includes("\n") && !data.includes("\r");
+  const text = stripBracketedPaste(input);
+  if (text.includes("\r") || text === "\n") return "";
+  if (text === "\x7f" || text === "\x08") return draft.slice(0, -1);
+  if (text === "\x15" || text === "\x03") return "";
+  if (text.startsWith("\x1b") || text === "\t") return draft;
+  if (/[\x00-\x1f\x7f]/.test(text)) return draft;
+  return draft + text;
 }
 
 function splitPartial(partial: string): { head: string; token: string } {
@@ -204,7 +199,7 @@ function suggestionScore(partial: string, suggestion: string): number {
     return 2;
   }
 
-  return suggestionLower.includes(tokenLower) ? 1 : 0;
+  return 0;
 }
 
 export function findTerminalSuggestions(
@@ -227,31 +222,53 @@ export function findTerminalSuggestions(
 
   return pool
     .map((item) => ({ item, score: suggestionScore(normalized, item) }))
-    .filter(({ score }) => score > 0)
+    .filter(
+      ({ score, item }) =>
+        score > 0 && completionSuffix(normalized, item).length > 0,
+    )
     .sort((left, right) => right.score - left.score || left.item.localeCompare(right.item))
     .slice(0, MAX_SUGGESTIONS)
     .map(({ item }) => item);
 }
 
+function sharesPrefix(value: string, prefix: string): boolean {
+  if (!prefix) return false;
+  if (prefix.length > value.length) return false;
+  return value.slice(0, prefix.length).toLowerCase() === prefix.toLowerCase();
+}
+
+function limitCompletionSegment(text: string): string {
+  let end = text.length;
+  const slash = text.indexOf("/");
+  const space = text.indexOf(" ");
+  if (slash >= 0) end = Math.min(end, slash);
+  if (space >= 0) end = Math.min(end, space);
+  return text.slice(0, end);
+}
+
 export function completionSuffix(partial: string, suggestion: string): string {
   if (!suggestion) return "";
 
-  if (suggestion.startsWith(partial)) {
-    return suggestion.slice(partial.length);
+  if (sharesPrefix(suggestion, partial)) {
+    const limitedSuggestion =
+      suggestion.slice(0, partial.length) +
+      limitCompletionSegment(suggestion.slice(partial.length));
+    return limitedSuggestion.slice(partial.length);
   }
 
   const { head, token } = splitPartial(partial);
   if (!token) return "";
 
-  if (head && suggestion.startsWith(head)) {
-    const tail = suggestion.slice(head.length);
-    if (tail.startsWith(token)) {
+  if (head && sharesPrefix(suggestion, head)) {
+    const tail = limitCompletionSegment(suggestion.slice(head.length));
+    if (sharesPrefix(tail, token)) {
       return tail.slice(token.length);
     }
   }
 
-  if (suggestion.startsWith(token)) {
-    return suggestion.slice(token.length);
+  const limited = limitCompletionSegment(suggestion);
+  if (sharesPrefix(limited, token)) {
+    return limited.slice(token.length);
   }
 
   return "";
@@ -259,22 +276,22 @@ export function completionSuffix(partial: string, suggestion: string): string {
 
 function completedTail(partial: string, suggestion: string): string {
   const { head, token } = splitPartial(partial);
-  if (!token) return suggestion;
+  if (!token) return limitCompletionSegment(suggestion);
 
-  if (head && suggestion.startsWith(head)) {
-    return suggestion.slice(head.length);
+  if (head && sharesPrefix(suggestion, head)) {
+    return limitCompletionSegment(suggestion.slice(head.length));
   }
 
-  if (suggestion.startsWith(token)) {
-    return suggestion;
+  if (sharesPrefix(suggestion, token)) {
+    return limitCompletionSegment(suggestion);
   }
 
-  return suggestion;
+  return limitCompletionSegment(suggestion);
 }
 
 /**
- * Build bytes to send for Tab completion. Replaces the last token on the server
- * so lagging echo (network) cannot stack suffixes onto a stale PTY cursor.
+ * Build bytes to send for Tab completion. Prefer appending a suffix over
+ * backspaces so network lag and shell readline state stay in sync.
  */
 export function buildCompletionPayload(
   partial: string,
@@ -283,9 +300,13 @@ export function buildCompletionPayload(
   if (!suggestion) return null;
 
   const partialTrimmed = partial.trimStart();
+  if (!partialTrimmed) return null;
 
-  if (suggestion.startsWith(partialTrimmed)) {
-    const suffix = suggestion.slice(partialTrimmed.length);
+  if (sharesPrefix(suggestion, partialTrimmed)) {
+    const limitedSuggestion =
+      suggestion.slice(0, partialTrimmed.length) +
+      limitCompletionSegment(suggestion.slice(partialTrimmed.length));
+    const suffix = limitedSuggestion.slice(partialTrimmed.length);
     if (!suffix) return null;
     return {
       payload: suffix,
@@ -298,6 +319,15 @@ export function buildCompletionPayload(
 
   const { head, token } = splitPartial(partialTrimmed);
   const tail = completedTail(partialTrimmed, suggestion);
+
+  if (sharesPrefix(tail, token)) {
+    const appendSuffix = tail.slice(token.length);
+    if (!appendSuffix) return null;
+    return {
+      payload: appendSuffix,
+      nextDraft: head + tail,
+    };
+  }
 
   return {
     payload: "\x7f".repeat(token.length) + tail,

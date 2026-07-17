@@ -25,9 +25,6 @@ import {
   buildCompletionPayload,
   findTerminalSuggestions,
   pushTerminalHistory,
-  resolveInputPartial,
-  shouldSyncDraftFromEcho,
-  syncDraftFromTerminal,
 } from "@/lib/terminal-suggestions";
 import { cn } from "@/lib/utils";
 import type { SessionCloseReason, TerminalWidgetProps } from "./types";
@@ -138,6 +135,7 @@ function SessionPane({
   const suggestionsRef = useRef<string[]>([]);
   const activeSuggestionIndexRef = useRef(0);
   const draftRef = useRef("");
+  const clientTabHandledRef = useRef(false);
   suggestionsRef.current = suggestions;
   activeSuggestionIndexRef.current = activeSuggestionIndex;
   onStatusChangeRef.current = onStatusChange;
@@ -148,25 +146,17 @@ function SessionPane({
       session.serverId,
       nextPartial,
     );
+    suggestionsRef.current = nextSuggestions;
+    activeSuggestionIndexRef.current = 0;
     setPartial(nextPartial);
     setSuggestions(nextSuggestions);
     setActiveSuggestionIndex(0);
   };
 
-  const readInputState = () => {
-    const terminal = terminalRef.current;
-    const draft = draftRef.current;
-    if (!terminal) {
-      return draft;
-    }
-    return resolveInputPartial(terminal, draft);
-  };
-
   const applySuggestion = (suggestion: string) => {
-    const terminal = terminalRef.current;
     const ws = wsRef.current;
-    if (!terminal || !ws || ws.readyState !== WebSocket.OPEN) return;
-    const partial = readInputState();
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const partial = draftRef.current;
     const completion = buildCompletionPayload(partial, suggestion);
     if (!completion) return;
     ws.send(completion.payload);
@@ -327,23 +317,30 @@ function SessionPane({
           return;
         }
         terminal.write(data);
-        if (shouldSyncDraftFromEcho(data)) {
-          const prev = draftRef.current;
-          draftRef.current = syncDraftFromTerminal(terminal, draftRef.current);
-          if (draftRef.current !== prev) {
-            updateSuggestions(draftRef.current);
-          }
-        }
       })();
     };
 
+    const hasClientTabMatches = () =>
+      findTerminalSuggestions(session.serverId, draftRef.current).length > 0;
+
     const onData = terminal.onData((input) => {
+      if (input === "\t") {
+        if (clientTabHandledRef.current) {
+          clientTabHandledRef.current = false;
+          return;
+        }
+        if (hasClientTabMatches()) {
+          return;
+        }
+      }
+
       if (input.includes("\r") || input === "\n") {
         const command = draftRef.current.trim();
         if (command) {
           pushTerminalHistory(session.serverId, command);
         }
         draftRef.current = "";
+        suggestionsRef.current = [];
         setSuggestions([]);
         setPartial("");
         setActiveSuggestionIndex(0);
@@ -397,14 +394,16 @@ function SessionPane({
         !event.altKey &&
         !event.metaKey
       ) {
-        const current = readInputState();
-        draftRef.current = current;
+        const current = draftRef.current;
         const matches = findTerminalSuggestions(session.serverId, current);
         if (matches.length === 0) return true;
 
         event.preventDefault();
+        clientTabHandledRef.current = true;
         const pick =
-          matches[activeSuggestionIndexRef.current] ?? matches[0] ?? "";
+          matches[Math.min(activeSuggestionIndexRef.current, matches.length - 1)] ??
+          matches[0] ??
+          "";
         if (pick) applySuggestion(pick);
         return false;
       }
