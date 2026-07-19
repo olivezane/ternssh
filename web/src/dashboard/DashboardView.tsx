@@ -17,6 +17,7 @@ import { useI18n } from "@/i18n";
 import { usePersonalization } from "@/theme";
 import { parseProcessWidgetConfig } from "@/lib/status-widget-config";
 import { useStatusPollInterval } from "@/lib/status-poll-interval";
+import { useLeavePageWarning } from "@/lib/use-leave-page-warning";
 import { ServerListWidget } from "@/widgets/ServerListWidget";
 import { FileManagerWidget } from "@/widgets/FileManagerWidget";
 import { AiCommandWidget } from "@/widgets/AiCommandWidget";
@@ -536,6 +537,13 @@ export function DashboardView() {
   );
 
   const sessionList = useMemo(() => listSessions(sessions), [sessions]);
+
+  const hasAliveSessions = useMemo(
+    () => sessionList.some((session) => isSessionAlive(session.status)),
+    [sessionList],
+  );
+
+  useLeavePageWarning(hasAliveSessions, t("dashboard.leavePageWarning"));
 
   const serverSessionsForTerminal = useMemo(
     () =>

@@ -141,6 +141,7 @@ export const zh = {
     moveFailed: "移动失败",
     createSessionFailed: "创建会话失败",
     sessionCount: "{count} 个会话",
+    leavePageWarning: "仍有 SSH 会话连接中，离开页面将断开连接。",
   },
   session: {
     connecting: "连接中",

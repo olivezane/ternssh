@@ -147,6 +147,8 @@ export const en: Messages = {
     moveFailed: "Failed to move item",
     createSessionFailed: "Failed to create session",
     sessionCount: "{count} sessions",
+    leavePageWarning:
+      "Active SSH sessions will be disconnected if you leave this page.",
   },
   session: {
     connecting: "Connecting",
