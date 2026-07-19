@@ -22,6 +22,8 @@ export const zh = {
   },
   header: {
     addWidget: "添加组件",
+    addWidgetSearchPlaceholder: "搜索组件…",
+    addWidgetNoResults: "没有匹配的组件",
     settings: "设置",
     settingsGeneral: "通用",
     settingsGeneralHint: "语言等基础选项",
@@ -123,6 +125,17 @@ export const zh = {
     ai_command: "AI 命令",
     comingSoon: "{type} 即将推出",
     deleteTitle: "删除组件",
+    descriptions: {
+      server_list: "浏览服务器与分组，连接 SSH 会话并管理主机列表。",
+      terminal: "交互式 SSH 终端，支持多标签、历史记录与命令提示。",
+      file_manager: "通过 SFTP 上传、下载、重命名和管理远程文件。",
+      status: "查看 CPU、内存、磁盘、负载与运行时间等服务器概览。",
+      network: "监控实时带宽、网卡流量与近期网络趋势。",
+      process: "查看运行中的进程及其 CPU、内存与状态信息。",
+      container: "查看 Docker 容器状态与主机上的资源占用。",
+      quick_commands: "保存常用命令，一键发送到当前终端执行。",
+      ai_command: "根据自然语言生成 Shell 命令并发送到终端。",
+    },
   },
   dashboard: {
     loading: "正在加载工作区...",

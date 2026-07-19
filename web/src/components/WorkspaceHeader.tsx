@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { HeaderSettingsMenu } from "@/components/HeaderSettingsMenu";
+import { isDesktopApp } from "@/lib/desktop-runtime";
 import { useSiteName } from "@/lib/site-name-context";
 
 interface WorkspaceHeaderProps {
@@ -8,6 +9,10 @@ interface WorkspaceHeaderProps {
 
 export function WorkspaceHeader({ actions }: WorkspaceHeaderProps) {
   const { siteName } = useSiteName();
+
+  if (isDesktopApp()) {
+    return null;
+  }
 
   return (
     <header className="workspace-header">

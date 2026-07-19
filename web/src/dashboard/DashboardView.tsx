@@ -36,6 +36,7 @@ import { EditServerDialog } from "./EditServerDialog";
 import { RenameGroupDialog } from "./RenameGroupDialog";
 import { ProcessSettingsDialog } from "./ProcessSettingsDialog";
 import { AddWidgetMenu } from "./AddWidgetMenu";
+import { DashboardDesktopChrome } from "./DashboardDesktopChrome";
 import { GridDashboard } from "./GridDashboard";
 import { findWidgetPlacement, layoutsEqual, type GridItem } from "./grid-utils";
 import { collectAllGroupIds, findServerInTree } from "@/lib/server-tree";
@@ -51,6 +52,7 @@ import {
   releaseSftpClient,
 } from "@/lib/sftp-session-pool";
 import { ADDABLE_WIDGETS, widgetTitleKey } from "./widgets";
+import { useDashboardDesktopBridge } from "@/lib/use-desktop-bridge";
 
 const DEFAULT_GRID_ITEM = {
   minW: 2,
@@ -141,6 +143,8 @@ export function DashboardView() {
   const [aiSettingsWidgetId, setAiSettingsWidgetId] = useState<string | null>(
     null,
   );
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [addWidgetMenuOpen, setAddWidgetMenuOpen] = useState(false);
   const dashboardRef = useRef<Dashboard | null>(null);
   const persistTimerRef = useRef<number | null>(null);
   const isEditingRef = useRef(false);
@@ -164,6 +168,14 @@ export function DashboardView() {
     },
     [clearReconnectTimer],
   );
+
+  const openAddWidgetFromDesktop = useCallback(() => {
+    setAddWidgetMenuOpen(true);
+  }, []);
+
+  const openSettingsFromDesktop = useCallback(() => {
+    setSettingsOpen(true);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -722,6 +734,11 @@ export function DashboardView() {
     })();
   }, [layout, t]);
 
+  useDashboardDesktopBridge({
+    openAddWidget: openAddWidgetFromDesktop,
+    openSettings: openSettingsFromDesktop,
+  });
+
   const handleDeleteServer = async (serverId: string) => {
     handleDisconnectServer(serverId);
     await api.deleteServer(serverId);
@@ -759,6 +776,15 @@ export function DashboardView() {
   if (loading && !dashboard) {
     return (
       <>
+        <DashboardDesktopChrome
+          existingTypes={existingWidgetTypes}
+          onAddWidget={handleAddWidget}
+          addWidgetOpen={addWidgetMenuOpen}
+          onAddWidgetOpenChange={setAddWidgetMenuOpen}
+          settingsOpen={settingsOpen}
+          onSettingsOpenChange={setSettingsOpen}
+          disabled
+        />
         <WorkspaceHeader />
         <div className="workspace flex items-center justify-center text-sm text-[var(--color-muted-foreground)]">
           {t("dashboard.loading")}
@@ -770,6 +796,15 @@ export function DashboardView() {
   if (error && !dashboard) {
     return (
       <>
+        <DashboardDesktopChrome
+          existingTypes={existingWidgetTypes}
+          onAddWidget={handleAddWidget}
+          addWidgetOpen={addWidgetMenuOpen}
+          onAddWidgetOpenChange={setAddWidgetMenuOpen}
+          settingsOpen={settingsOpen}
+          onSettingsOpenChange={setSettingsOpen}
+          disabled
+        />
         <WorkspaceHeader />
         <div className="workspace flex items-center justify-center text-sm text-[var(--color-destructive)]">
           {error}
@@ -784,6 +819,16 @@ export function DashboardView() {
 
   return (
     <>
+      <DashboardDesktopChrome
+        existingTypes={existingWidgetTypes}
+        onAddWidget={handleAddWidget}
+        addWidgetOpen={addWidgetMenuOpen}
+        onAddWidgetOpenChange={setAddWidgetMenuOpen}
+        settingsOpen={settingsOpen}
+        onSettingsOpenChange={setSettingsOpen}
+        disabled={loading}
+      />
+
       <WorkspaceHeader
         actions={
           <>

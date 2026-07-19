@@ -24,6 +24,8 @@ export const en: Messages = {
   },
   header: {
     addWidget: "Add widget",
+    addWidgetSearchPlaceholder: "Search widgets…",
+    addWidgetNoResults: "No matching widgets",
     settings: "Settings",
     settingsGeneral: "General",
     settingsGeneralHint: "Language and other basic options",
@@ -130,6 +132,17 @@ export const en: Messages = {
     ai_command: "AI commands",
     comingSoon: "{type} coming soon",
     deleteTitle: "Remove widget",
+    descriptions: {
+      server_list: "Browse servers and groups, connect SSH sessions, and manage your inventory.",
+      terminal: "Interactive SSH shell with tabs, history, and ghost command suggestions.",
+      file_manager: "Upload, download, rename, and organize remote files over SFTP.",
+      status: "Monitor CPU, memory, disk, load averages, and uptime at a glance.",
+      network: "Track live bandwidth, interfaces, and recent traffic trends.",
+      process: "Inspect running processes with CPU, memory, and status details.",
+      container: "View Docker containers, states, and resource usage on the host.",
+      quick_commands: "Save one-click commands and send them to the active terminal.",
+      ai_command: "Generate shell commands from prompts and run them in the terminal.",
+    },
   },
   dashboard: {
     loading: "Loading workspace...",

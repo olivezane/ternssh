@@ -187,6 +187,19 @@ html[data-theme="dark"] .app-brand-logo {
   backdrop-filter: blur(8px);
 }
 
+html.ternssh-desktop {
+  --workspace-header-height: 0px;
+  --workspace-header-margin-bottom: 0px;
+}
+
+html.ternssh-desktop .workspace-header {
+  display: none;
+}
+
+html.ternssh-desktop .workspace-toast {
+  top: 8px;
+}
+
 .grid-dashboard-host {
   position: relative;
   width: 100%;
