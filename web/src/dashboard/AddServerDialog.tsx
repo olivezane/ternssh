@@ -9,6 +9,10 @@ import { useT } from "@/i18n";
 import { api } from "@/lib/api";
 import { maybeSavePrivateKey } from "@/lib/saved-private-keys";
 import { maybeSavePassword } from "@/lib/saved-passwords";
+import {
+  privateKeyRequiresPassphrase,
+  serializePrivateKeyCredential,
+} from "@/lib/private-key-credential";
 import { isValidServerHost } from "@/lib/validate-host";
 
 interface AddServerDialogProps {
@@ -33,6 +37,7 @@ export function AddServerDialog({
     "password",
   );
   const [credential, setCredential] = useState("");
+  const [passphrase, setPassphrase] = useState("");
   const [saveKey, setSaveKey] = useState(false);
   const [keyName, setKeyName] = useState("");
   const [savePassword, setSavePassword] = useState(false);
@@ -49,6 +54,7 @@ export function AddServerDialog({
     setUsername("");
     setAuthType("password");
     setCredential("");
+    setPassphrase("");
     setSaveKey(false);
     setKeyName("");
     setSavePassword(false);
@@ -66,17 +72,29 @@ export function AddServerDialog({
     setError(null);
     try {
       const trimmedCredential = credential.trim();
+      const trimmedPassphrase = passphrase.trim();
+      if (
+        authType === "private_key" &&
+        privateKeyRequiresPassphrase(trimmedCredential, trimmedPassphrase)
+      ) {
+        setError(t("privateKey.passphraseRequired"));
+        return;
+      }
+      const storedCredential =
+        authType === "private_key"
+          ? serializePrivateKeyCredential(trimmedCredential, trimmedPassphrase)
+          : trimmedCredential;
       await api.createServer({
         name,
         host,
         port: Number(port),
         username,
         auth_type: authType,
-        credential: trimmedCredential,
+        credential: storedCredential,
         group_id: groupId,
       });
       if (authType === "private_key") {
-        await maybeSavePrivateKey(keyName, trimmedCredential, saveKey);
+        await maybeSavePrivateKey(keyName, storedCredential, saveKey);
       } else {
         await maybeSavePassword(passwordName, trimmedCredential, savePassword);
       }
@@ -173,6 +191,8 @@ export function AddServerDialog({
                 id="credential"
                 value={credential}
                 onChange={setCredential}
+                passphrase={passphrase}
+                onPassphraseChange={setPassphrase}
                 saveKey={saveKey}
                 onSaveKeyChange={setSaveKey}
                 keyName={keyName}

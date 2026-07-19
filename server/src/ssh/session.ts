@@ -1078,7 +1078,8 @@ export class SSHSession {
       authRequest = await SSHAuth.buildPublicKeyAuthRequest(
         this.config.username,
         this.config.privateKey,
-        this.sessionID!
+        this.sessionID!,
+        this.config.privateKeyPassphrase,
       );
     } else {
       authRequest = SSHAuth.buildPasswordAuthRequest(

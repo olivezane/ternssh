@@ -13,6 +13,7 @@
     "db:migrate": "wrangler d1 migrations apply ternssh --remote --config ../wrangler.jsonc"
   },
   "dependencies": {
+    "bcrypt-pbkdf": "^1.0.2",
     "hono": "^4.11.3",
     "jose": "^6.0.11"
   },

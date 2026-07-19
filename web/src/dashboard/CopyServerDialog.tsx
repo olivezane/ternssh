@@ -9,6 +9,10 @@ import { useT } from "@/i18n";
 import { api, type Server } from "@/lib/api";
 import { maybeSavePrivateKey } from "@/lib/saved-private-keys";
 import { maybeSavePassword } from "@/lib/saved-passwords";
+import {
+  privateKeyRequiresPassphrase,
+  serializePrivateKeyCredential,
+} from "@/lib/private-key-credential";
 import { isValidServerHost } from "@/lib/validate-host";
 
 interface CopyServerDialogProps {
@@ -33,6 +37,7 @@ export function CopyServerDialog({
     "password",
   );
   const [credential, setCredential] = useState("");
+  const [passphrase, setPassphrase] = useState("");
   const [saveKey, setSaveKey] = useState(false);
   const [keyName, setKeyName] = useState("");
   const [savePassword, setSavePassword] = useState(false);
@@ -48,6 +53,7 @@ export function CopyServerDialog({
     setUsername(source.username);
     setAuthType(source.auth_type);
     setCredential("");
+    setPassphrase("");
     setSaveKey(false);
     setKeyName("");
     setSavePassword(false);
@@ -67,6 +73,20 @@ export function CopyServerDialog({
     setError(null);
     try {
       const trimmedCredential = credential.trim();
+      const trimmedPassphrase = passphrase.trim();
+      if (
+        authType === "private_key" &&
+        trimmedCredential &&
+        privateKeyRequiresPassphrase(trimmedCredential, trimmedPassphrase)
+      ) {
+        setError(t("privateKey.passphraseRequired"));
+        return;
+      }
+      const storedCredential = trimmedCredential
+        ? authType === "private_key"
+          ? serializePrivateKeyCredential(trimmedCredential, trimmedPassphrase)
+          : trimmedCredential
+        : undefined;
       await api.copyServer(source.id, {
         name,
         host,
@@ -74,10 +94,10 @@ export function CopyServerDialog({
         username,
         auth_type: authType,
         group_id: source.group_id,
-        ...(trimmedCredential ? { credential: trimmedCredential } : {}),
+        ...(storedCredential ? { credential: storedCredential } : {}),
       });
-      if (authType === "private_key" && trimmedCredential) {
-        await maybeSavePrivateKey(keyName, trimmedCredential, saveKey);
+      if (authType === "private_key" && storedCredential) {
+        await maybeSavePrivateKey(keyName, storedCredential, saveKey);
       } else if (authType === "password" && trimmedCredential) {
         await maybeSavePassword(passwordName, trimmedCredential, savePassword);
       }
@@ -174,6 +194,8 @@ export function CopyServerDialog({
               id="copy-credential"
               value={credential}
               onChange={setCredential}
+              passphrase={passphrase}
+              onPassphraseChange={setPassphrase}
               saveKey={saveKey}
               onSaveKeyChange={setSaveKey}
               keyName={keyName}

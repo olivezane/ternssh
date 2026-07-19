@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { getCredentialValue, getServer } from "../db/servers";
+import { buildSSHConnectionConfig } from "../lib/ssh-connection-config";
 import {
   buildLightStatusCommand,
   buildProcessMetricsCommand,
@@ -115,18 +116,7 @@ export class SshSession extends DurableObject<Env> {
       return new Response("Credential not found", { status: 404 });
     }
 
-    const config: SSHConnectionConfig = {
-      host: serverRecord.host,
-      port: serverRecord.port,
-      username: serverRecord.username,
-      password: serverRecord.auth_type === "password" ? credential : "",
-      authMethod:
-        serverRecord.auth_type === "private_key" ? "publickey" : "password",
-      privateKey:
-        serverRecord.auth_type === "private_key" ? credential : undefined,
-      cols: 120,
-      rows: 40,
-    };
+    const config = buildSSHConnectionConfig(serverRecord, credential);
 
     this.activeSession = session;
     queueMicrotask(() => {
@@ -489,18 +479,7 @@ export class SshSession extends DurableObject<Env> {
     );
     if (!credential) return null;
 
-    this.connectionConfig = {
-      host: serverRecord.host,
-      port: serverRecord.port,
-      username: serverRecord.username,
-      password: serverRecord.auth_type === "password" ? credential : "",
-      authMethod:
-        serverRecord.auth_type === "private_key" ? "publickey" : "password",
-      privateKey:
-        serverRecord.auth_type === "private_key" ? credential : undefined,
-      cols: 120,
-      rows: 40,
-    };
+    this.connectionConfig = buildSSHConnectionConfig(serverRecord, credential);
     return this.connectionConfig;
   }
 

@@ -1,4 +1,5 @@
 import { SSH_MSG_USERAUTH_REQUEST, SSH_MSG_USERAUTH_SUCCESS, SSH_MSG_USERAUTH_FAILURE, AuthResult } from './types';
+import { prepareOpenSSHPrivateKey } from './openssh-key';
 import { encodeString, concat, readUint32 } from './utils';
 
 export class SSHAuth {
@@ -25,9 +26,11 @@ export class SSHAuth {
   static async buildPublicKeyAuthRequest(
     username: string,
     privateKeyPEM: string,
-    sessionID: Uint8Array
+    sessionID: Uint8Array,
+    passphrase?: string,
   ): Promise<Uint8Array> {
-    const { signingKey, publicKeyBlob } = await this.parseEd25519PrivateKey(privateKeyPEM);
+    const decryptedKey = await prepareOpenSSHPrivateKey(privateKeyPEM, passphrase);
+    const { signingKey, publicKeyBlob } = await this.parseEd25519PrivateKey(decryptedKey);
 
     // Build the request body (without signature first)
     const requestBody = concat(
@@ -83,7 +86,7 @@ export class SSHAuth {
     const cipherLen = readUint32(raw, offset); offset += 4;
     if (offset + cipherLen > raw.length) throw new Error('私钥格式损坏：cipher 越界');
     const cipher = new TextDecoder().decode(raw.slice(offset, offset + cipherLen)); offset += cipherLen;
-    if (cipher !== 'none') throw new Error('不支持加密的私钥，请使用 ssh-keygen -p 移除密码');
+    if (cipher !== 'none') throw new Error('私钥已加密，请输入私钥密码');
 
     // kdfname
     if (offset + 4 > raw.length) throw new Error('私钥格式损坏：kdfLen 越界');

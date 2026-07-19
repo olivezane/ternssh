@@ -5,6 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useT } from "@/i18n";
 import {
+  isEncryptedOpenSSHPrivateKey,
+  parsePrivateKeyCredential,
+} from "@/lib/private-key-credential";
+import {
   privateKeyLabelFromFile,
   readPrivateKeyFile,
 } from "@/lib/private-key-file";
@@ -19,6 +23,8 @@ interface PrivateKeyFieldProps {
   id: string;
   value: string;
   onChange: (value: string) => void;
+  passphrase: string;
+  onPassphraseChange: (value: string) => void;
   saveKey: boolean;
   onSaveKeyChange: (save: boolean) => void;
   keyName: string;
@@ -31,6 +37,8 @@ export function PrivateKeyField({
   id,
   value,
   onChange,
+  passphrase,
+  onPassphraseChange,
   saveKey,
   onSaveKeyChange,
   keyName,
@@ -46,6 +54,7 @@ export function PrivateKeyField({
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const encrypted = isEncryptedOpenSSHPrivateKey(value);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +83,7 @@ export function PrivateKeyField({
         return;
       }
       onChange(text);
+      onPassphraseChange("");
       onKeyNameChange(privateKeyLabelFromFile(file));
       setUploadFileName(file.name);
       setSelectedKeyId("");
@@ -87,7 +97,9 @@ export function PrivateKeyField({
     if (!keyId) return;
     const saved = savedKeys.find((item) => item.id === keyId);
     if (!saved) return;
-    onChange(saved.content);
+    const parsed = parsePrivateKeyCredential(saved.content);
+    onChange(parsed.privateKey);
+    onPassphraseChange(parsed.passphrase ?? "");
     onKeyNameChange(saved.name);
     onSaveKeyChange(false);
     setUploadFileName(null);
@@ -221,6 +233,23 @@ export function PrivateKeyField({
         placeholder={placeholder ?? t("privateKey.pastePlaceholder")}
         required={required}
       />
+
+      <div className="grid gap-2">
+        <Label htmlFor={`${id}-passphrase`}>{t("privateKey.passphrase")}</Label>
+        <Input
+          id={`${id}-passphrase`}
+          type="password"
+          value={passphrase}
+          onChange={(event) => onPassphraseChange(event.target.value)}
+          autoComplete="off"
+          placeholder={t("privateKey.passphraseHint")}
+        />
+        {encrypted && !passphrase.trim() && (
+          <p className="text-[11px] text-[var(--color-destructive)]">
+            {t("privateKey.encryptedDetected")}
+          </p>
+        )}
+      </div>
 
       <label className="flex items-center gap-2 text-sm">
         <input
