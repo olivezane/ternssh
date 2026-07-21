@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type ChangeEvent, type DragEvent, type MouseEvent } from "react";
 import {
   ArrowUp,
   Download,
@@ -16,7 +16,9 @@ import { ContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useT } from "@/i18n";
+import { parseFileManagerWidgetConfig } from "@/lib/file-manager-widget-config";
 import {
+  getPrimarySessionForServer,
   getSftpSessionForServer,
   isSessionAlive,
   type ServerSession,
@@ -39,6 +41,14 @@ import {
 } from "@/lib/sftp-session-pool";
 import { cn } from "@/lib/utils";
 import { formatBitrate } from "@/lib/server-status";
+import {
+  getTerminalCwd,
+  resolveTerminalPathForSftp,
+  setTerminalHomeDir,
+  subscribeTerminalCwd,
+  syncTerminalCwdFromRemotePath,
+} from "@/lib/terminal-cwd-bridge";
+import { isAbsoluteRemotePath } from "@/lib/terminal-cwd";
 
 const FileEditorDialog = lazy(() =>
   import("@/widgets/FileEditorDialog").then((module) => ({
@@ -48,7 +58,9 @@ const FileEditorDialog = lazy(() =>
 
 export interface FileManagerWidgetProps {
   activeServerId: string | null;
+  activeSessionId: string | null;
   sessions: Record<string, ServerSession>;
+  configJson: string | null;
 }
 
 interface MenuState {
@@ -139,12 +151,33 @@ function formatModifiedTime(timestamp: number): string {
 
 export function FileManagerWidget({
   activeServerId,
+  activeSessionId,
   sessions,
+  configJson,
 }: FileManagerWidgetProps) {
   const t = useT();
+  const config = useMemo(
+    () => parseFileManagerWidgetConfig(configJson),
+    [configJson],
+  );
+  const followTerminalCwd = config.followTerminalCwd;
   const session = activeServerId
     ? getSftpSessionForServer(sessions, activeServerId)
     : null;
+  const followSessionId = useMemo(() => {
+    if (!followTerminalCwd || !activeServerId) return null;
+    if (
+      activeSessionId &&
+      sessions[activeSessionId]?.serverId === activeServerId
+    ) {
+      return activeSessionId;
+    }
+    return getPrimarySessionForServer(
+      sessions,
+      activeServerId,
+      activeSessionId,
+    )?.sessionId ?? null;
+  }, [activeServerId, activeSessionId, followTerminalCwd, sessions]);
   const clientRef = useRef<SftpClient | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -169,6 +202,7 @@ export function FileManagerWidget({
   const activeUploadClientsRef = useRef<Set<SftpClient>>(new Set());
   const uploadCancelledRef = useRef(false);
   const uploadStartedAtRef = useRef(0);
+  const remotePathRef = useRef(".");
 
   const sortedEntries = useMemo(() => sortSftpEntries(entries), [entries]);
   const selectedEntry = useMemo(
@@ -192,28 +226,77 @@ export function FileManagerWidget({
     };
   }, [clearClientRef]);
 
-  const loadDirectory = useCallback(async (path: string) => {
+  const loadDirectory = useCallback(async (path: string, options?: { silent?: boolean }) => {
     if (!isActive()) return;
 
     const client = clientRef.current;
     if (!client) return;
 
     setLoading(true);
-    setError(null);
+    if (!options?.silent) {
+      setError(null);
+    }
     try {
       const result = await client.list(path);
       if (!isActive()) return;
+      if (session) {
+        setTerminalHomeDir(session.serverId, result.path);
+        if (followSessionId) {
+          syncTerminalCwdFromRemotePath(followSessionId, result.path);
+        }
+      }
       setRemotePath(result.path);
       setPathInput(result.path);
+      remotePathRef.current = result.path;
       setEntries(result.entries);
       setSelectedName(null);
     } catch (err) {
       if (!isActive()) return;
-      setError(err instanceof Error ? err.message : t("fileManager.readDirFailed"));
+      if (!options?.silent) {
+        setError(err instanceof Error ? err.message : t("fileManager.readDirFailed"));
+      }
     } finally {
       if (isActive()) setLoading(false);
     }
-  }, [isActive, t]);
+  }, [followSessionId, isActive, session, t]);
+
+  useEffect(() => {
+    remotePathRef.current = remotePath;
+  }, [remotePath]);
+
+  useEffect(() => {
+    if (!followTerminalCwd || !followSessionId || !ready || !activeServerId) return;
+
+    if (remotePathRef.current !== ".") {
+      syncTerminalCwdFromRemotePath(followSessionId, remotePathRef.current);
+    }
+
+    const initialCwd = getTerminalCwd(followSessionId);
+    const initialResolved = resolveTerminalPathForSftp(
+      followSessionId,
+      activeServerId,
+      remotePathRef.current,
+      initialCwd,
+    );
+    if (
+      initialResolved &&
+      initialResolved !== remotePathRef.current &&
+      isAbsoluteRemotePath(initialResolved)
+    ) {
+      void loadDirectory(initialResolved, { silent: true });
+    }
+
+    return subscribeTerminalCwd(followSessionId, (cwd) => {
+      const resolved = resolveTerminalPathForSftp(
+        followSessionId,
+        activeServerId,
+        remotePathRef.current,
+        cwd,
+      );
+      if (!resolved || resolved === remotePathRef.current) return;
+      void loadDirectory(resolved, { silent: true });
+    });
+  }, [activeServerId, followTerminalCwd, followSessionId, ready, loadDirectory]);
 
   useEffect(() => {
     if (!session || session.status !== "open") {
@@ -252,8 +335,10 @@ export function FileManagerWidget({
           setReady(true);
           const result = await client.list(".");
           if (cancelled || !isActive()) return;
+          setTerminalHomeDir(session.serverId, result.path);
           setRemotePath(result.path);
           setPathInput(result.path);
+          remotePathRef.current = result.path;
           setEntries(result.entries);
           setSelectedName(null);
           setLoading(false);

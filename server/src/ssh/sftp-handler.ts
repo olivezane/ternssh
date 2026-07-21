@@ -310,9 +310,10 @@ export class SFTPHandler {
           resolvedPath = entries[0].filename;
           if (this.debugEnabled) this.sendDebug(`[SFTP] resolved path: "${resolvedPath}"`);
         }
-      } else if (realPathType === SSH_FXP_STATUS) {
+      } else {
         const status = this.sftp.parseStatusResponse(realPathResp);
-        if (this.debugEnabled) this.sendDebug(`[SFTP] realpath failed: code=${status.code}, msg=${status.message}`);
+        this.sendError('list', status.message);
+        return;
       }
 
       // Open directory

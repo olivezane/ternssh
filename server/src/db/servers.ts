@@ -1,4 +1,8 @@
 import { newId } from "../lib/id";
+import {
+  mergePrivateKeyCredential,
+  validatePrivateKeyCredential,
+} from "../lib/private-key-credential";
 import type { GroupRecord, ServerPublic, ServerRecord, TreeNode } from "../types";
 
 function toPublic(server: ServerRecord): ServerPublic {
@@ -262,6 +266,10 @@ export async function createServer(
     if (!group) throw new Error("group not found");
   }
 
+  const credential =
+    input.auth_type === "private_key"
+      ? validatePrivateKeyCredential(input.credential)
+      : input.credential.trim();
   const serverId = newId();
   const credentialId = newId();
   const sortOrder = await nextSortOrder(db, userId, groupId, groupId);
@@ -271,7 +279,7 @@ export async function createServer(
       .prepare(
         "INSERT INTO credentials (id, user_id, value) VALUES (?, ?, ?)",
       )
-      .bind(credentialId, userId, input.credential),
+      .bind(credentialId, userId, credential),
     db
       .prepare(
         `INSERT INTO servers (id, user_id, name, host, port, username, auth_type, credential_ref, group_id, sort_order)
@@ -307,6 +315,7 @@ export async function updateServer(
     username?: string;
     auth_type?: "password" | "private_key";
     credential?: string;
+    passphrase?: string;
     group_id?: string | null;
   },
 ): Promise<ServerPublic | null> {
@@ -319,13 +328,27 @@ export async function updateServer(
   }
 
   const statements: D1PreparedStatement[] = [];
+  const nextAuthType = input.auth_type ?? existing.auth_type;
 
-  if (input.credential !== undefined) {
-    statements.push(
-      db
-        .prepare("UPDATE credentials SET value = ? WHERE id = ? AND user_id = ?")
-        .bind(input.credential, existing.credential_ref, userId),
+  if (
+    input.credential !== undefined ||
+    input.passphrase !== undefined
+  ) {
+    const existingCredential =
+      (await getCredentialValue(db, userId, existing.credential_ref)) ?? "";
+    const merged = mergePrivateKeyCredential(
+      existingCredential,
+      input.credential,
+      input.passphrase,
+      nextAuthType,
     );
+    if (merged !== undefined) {
+      statements.push(
+        db
+          .prepare("UPDATE credentials SET value = ? WHERE id = ? AND user_id = ?")
+          .bind(merged, existing.credential_ref, userId),
+      );
+    }
   }
 
   statements.push(

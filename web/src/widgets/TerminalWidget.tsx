@@ -5,7 +5,8 @@ import { Terminal } from "@xterm/xterm";
 import { TerminalGhostSuggestion } from "@/components/TerminalGhostSuggestion";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
-import { usePersonalization } from "@/theme";
+import { parseTerminalWidgetConfig } from "@/lib/terminal-widget-config";
+import { useTheme, resolveTerminalXtermTheme } from "@/theme";
 import {
   buildXtermTheme,
   resolveTerminalAppearance,
@@ -20,6 +21,12 @@ import {
   registerSessionStatusTransport,
 } from "@/lib/session-status-bridge";
 import { registerTerminalRunner } from "@/lib/terminal-bridge";
+import {
+  clearTerminalCwd,
+  setTerminalCwd,
+  updateTerminalCwdFromCommand,
+  updateTerminalCwdFromOutput,
+} from "@/lib/terminal-cwd-bridge";
 import {
   applyInputToDraft,
   buildCompletionPayload,
@@ -110,6 +117,7 @@ interface SessionPaneProps {
   onClosed: (reason?: SessionCloseReason) => void;
   t: (key: string, params?: Record<string, string | number>) => string;
   xtermTheme: XtermTerminalTheme;
+  fontSize: number;
 }
 
 function SessionPane({
@@ -119,6 +127,7 @@ function SessionPane({
   onClosed,
   t,
   xtermTheme,
+  fontSize,
 }: SessionPaneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -179,7 +188,7 @@ function SessionPane({
       cursorBlink: true,
       convertEol: true,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-      fontSize: 13,
+      fontSize,
       // Lift truecolor / low-contrast paste echo on transparent backgrounds.
       minimumContrastRatio: 4.5,
       theme: xtermTheme,
@@ -205,6 +214,27 @@ function SessionPane({
     if (!terminal) return;
     terminal.options.theme = xtermTheme;
   }, [xtermTheme]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    const fitAddon = fitAddonRef.current;
+    const ws = wsRef.current;
+    if (!terminal) return;
+
+    terminal.options.fontSize = fontSize;
+    if (!fitAddon) return;
+
+    fitAddon.fit();
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(
+        JSON.stringify({
+          type: "resize",
+          cols: terminal.cols,
+          rows: terminal.rows,
+        }),
+      );
+    }
+  }, [fontSize]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -253,6 +283,11 @@ function SessionPane({
         return false;
       }
       const normalized = command.replace(/\r\n/g, "\n");
+      updateTerminalCwdFromCommand(
+        session.sessionId,
+        session.serverId,
+        normalized.trim(),
+      );
       term.write(`\x1b[0m${normalized.replace(/\n/g, "\r\n")}\r\n`);
       currentWs.send(`${normalized}\n`);
       return true;
@@ -292,6 +327,18 @@ function SessionPane({
       void (async () => {
         const data = await decodeWsPayload(event.data);
         if (data.startsWith("{")) {
+          try {
+            const parsed = JSON.parse(data) as {
+              type?: string;
+              path?: string;
+            };
+            if (parsed.type === "cwd" && typeof parsed.path === "string") {
+              setTerminalCwd(session.sessionId, parsed.path);
+              return;
+            }
+          } catch {
+            // not JSON control
+          }
           if (dispatchSessionStatusMessage(session.sessionId, data)) {
             return;
           }
@@ -316,6 +363,7 @@ function SessionPane({
           }
           return;
         }
+        updateTerminalCwdFromOutput(session.sessionId, data);
         terminal.write(data);
       })();
     };
@@ -338,6 +386,11 @@ function SessionPane({
         const command = draftRef.current.trim();
         if (command) {
           pushTerminalHistory(session.serverId, command);
+          updateTerminalCwdFromCommand(
+            session.sessionId,
+            session.serverId,
+            command,
+          );
         }
         draftRef.current = "";
         suggestionsRef.current = [];
@@ -419,6 +472,7 @@ function SessionPane({
       ws.close();
       wsRef.current = null;
       runCommandRef.current = () => false;
+      clearTerminalCwd(session.sessionId);
     };
   }, [session.serverId, session.sessionId, session.wsUrl, t]);
 
@@ -475,6 +529,7 @@ export function TerminalWidget({
   allSessions,
   activeServerId,
   activeSessionId,
+  configJson,
   onSelectSession,
   onAddTerminal,
   onCloseTerminal,
@@ -483,8 +538,17 @@ export function TerminalWidget({
   onStatusChange,
 }: TerminalWidgetProps) {
   const { t } = useI18n();
-  const { resolvedTerminalColors, resolvedTheme, terminalTheme } =
-    usePersonalization();
+  const { resolvedTheme } = useTheme();
+  const terminalConfig = useMemo(
+    () => parseTerminalWidgetConfig(configJson),
+    [configJson],
+  );
+  const terminalTheme = terminalConfig.theme;
+  const fontSize = terminalConfig.fontSize;
+  const resolvedTerminalColors = useMemo(
+    () => resolveTerminalXtermTheme(terminalTheme, resolvedTheme),
+    [terminalTheme, resolvedTheme],
+  );
   const xtermTheme = useMemo(
     () =>
       buildXtermTheme(
@@ -586,6 +650,7 @@ export function TerminalWidget({
               session.sessionId === activeSessionId
             }
             xtermTheme={xtermTheme}
+            fontSize={fontSize}
             session={session}
             t={t}
             onClosed={(reason) => onSessionClosed(session.sessionId, reason)}

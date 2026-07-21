@@ -23,6 +23,7 @@ interface GridDashboardProps {
   cols?: number;
   rowHeight?: number;
   margin?: [number, number];
+  layoutLocked?: boolean;
   onLayoutChange: (layout: GridItem[]) => void;
   getItemTitle: (item: GridItem) => string;
   renderHandleActions?: (item: GridItem) => ReactNode;
@@ -67,6 +68,7 @@ export function GridDashboard({
   cols = 12,
   rowHeight = 40,
   margin = [12, 12],
+  layoutLocked = false,
   onLayoutChange,
   getItemTitle,
   renderHandleActions,
@@ -207,6 +209,7 @@ export function GridDashboard({
   }, [interaction.kind, onLayoutChange, rowHeight]);
 
   const startDrag = (item: GridItem, event: ReactPointerEvent<HTMLElement>) => {
+    if (layoutLocked) return;
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
@@ -229,6 +232,7 @@ export function GridDashboard({
   };
 
   const startResize = (item: GridItem, event: ReactPointerEvent<HTMLElement>) => {
+    if (layoutLocked) return;
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
@@ -282,7 +286,12 @@ export function GridDashboard({
   };
 
   return (
-    <div ref={containerRef} className="grid-dashboard-host" style={hostStyle}>
+    <div
+      ref={containerRef}
+      className="grid-dashboard-host"
+      style={hostStyle}
+      data-layout-locked={layoutLocked || undefined}
+    >
       <div className="grid-dashboard-dots" aria-hidden />
       {layout.map((item) => {
         const gridItem =
@@ -311,14 +320,16 @@ export function GridDashboard({
             data-dodging={isDodging || undefined}
           >
             <div className="widget-drag-handle">
-              <button
-                type="button"
-                className="widget-drag-grip"
-                onPointerDown={(event) => startDrag(item, event)}
-                aria-label={t("grid.dragMove")}
-              >
-                <GripVertical className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" />
-              </button>
+              {!layoutLocked && (
+                <button
+                  type="button"
+                  className="widget-drag-grip"
+                  onPointerDown={(event) => startDrag(item, event)}
+                  aria-label={t("grid.dragMove")}
+                >
+                  <GripVertical className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" />
+                </button>
+              )}
               <span className="widget-drag-label">{getItemTitle(item)}</span>
               {renderHandleActions && (
                 <div
@@ -330,11 +341,13 @@ export function GridDashboard({
               )}
             </div>
             <div className="widget-body">{renderItem(item)}</div>
-            <div
-              className="widget-resize-handle widget-no-drag"
-              title={t("grid.dragResize")}
-              onPointerDown={(event) => startResize(item, event)}
-            />
+            {!layoutLocked && (
+              <div
+                className="widget-resize-handle widget-no-drag"
+                title={t("grid.dragResize")}
+                onPointerDown={(event) => startResize(item, event)}
+              />
+            )}
           </div>
         );
       })}

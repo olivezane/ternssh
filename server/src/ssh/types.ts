@@ -47,6 +47,7 @@ export interface SSHConnectionConfig {
   password: string;
   authMethod?: 'password' | 'publickey';
   privateKey?: string;
+  privateKeyPassphrase?: string;
   cols?: number;
   rows?: number;
   expectedFingerprint?: string;

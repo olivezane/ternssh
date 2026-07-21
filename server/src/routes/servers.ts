@@ -10,6 +10,7 @@ import {
   updateGroup,
   updateServer,
 } from "../db/servers";
+import { validatePrivateKeyCredential } from "../lib/private-key-credential";
 import { jsonError } from "../lib/http";
 import { isValidServerHost } from "../lib/resolve-host";
 import type { Variables } from "../types";
@@ -155,13 +156,17 @@ serverRoutes.post("/", async (c) => {
   }
 
   try {
+    const credential =
+      body.auth_type === "private_key"
+        ? validatePrivateKeyCredential(body.credential!.trim())
+        : body.credential!.trim();
     const server = await createServer(c.env.DB, user.id, {
       name: body.name.trim(),
       host: body.host!.trim(),
       port,
       username: body.username.trim(),
       auth_type: body.auth_type,
-      credential: body.credential,
+      credential,
       group_id: body.group_id ?? null,
     });
     return c.json({ server }, 201);
@@ -201,13 +206,20 @@ serverRoutes.post("/:id/copy", async (c) => {
   }
 
   try {
+    let credential = body.credential?.trim();
+    if (credential && body.auth_type === "private_key") {
+      credential = validatePrivateKeyCredential(credential);
+    } else if (credential && body.auth_type === "password") {
+      credential = credential.trim();
+    }
+
     const server = await copyServer(c.env.DB, user.id, sourceId, {
       name: body.name.trim(),
       host: body.host!.trim(),
       port,
       username: body.username.trim(),
       auth_type: body.auth_type,
-      credential: body.credential?.trim() || undefined,
+      credential,
       group_id: body.group_id ?? null,
     });
     return c.json({ server }, 201);
@@ -230,6 +242,7 @@ serverRoutes.put("/:id", async (c) => {
     username?: string;
     auth_type?: "password" | "private_key";
     credential?: string;
+    passphrase?: string;
     group_id?: string | null;
   }>();
 
@@ -253,13 +266,20 @@ serverRoutes.put("/:id", async (c) => {
   }
 
   try {
+    let credential = body.credential?.trim();
+    const nextAuthType = body.auth_type;
+    if (credential && nextAuthType === "private_key") {
+      credential = validatePrivateKeyCredential(credential);
+    }
+
     const server = await updateServer(c.env.DB, user.id, serverId, {
       name: body.name?.trim(),
       host: body.host?.trim(),
       username: body.username?.trim(),
       port: body.port,
       auth_type: body.auth_type,
-      credential: body.credential,
+      credential,
+      passphrase: body.passphrase,
       group_id: body.group_id,
     });
 

@@ -101,6 +101,7 @@ export interface UpdateServerInput {
   username?: string;
   auth_type?: "password" | "private_key";
   credential?: string;
+  passphrase?: string;
   group_id?: string | null;
 }
 

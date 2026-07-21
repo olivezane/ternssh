@@ -17,6 +17,8 @@ import { useI18n } from "@/i18n";
 import { usePersonalization } from "@/theme";
 import { parseProcessWidgetConfig } from "@/lib/status-widget-config";
 import { useStatusPollInterval } from "@/lib/status-poll-interval";
+import { useLayoutLocked } from "@/lib/layout-lock";
+import { useLeavePageWarning } from "@/lib/use-leave-page-warning";
 import { ServerListWidget } from "@/widgets/ServerListWidget";
 import { FileManagerWidget } from "@/widgets/FileManagerWidget";
 import { AiCommandWidget } from "@/widgets/AiCommandWidget";
@@ -34,7 +36,9 @@ import { AddServerDialog } from "./AddServerDialog";
 import { CopyServerDialog } from "./CopyServerDialog";
 import { EditServerDialog } from "./EditServerDialog";
 import { RenameGroupDialog } from "./RenameGroupDialog";
+import { FileManagerSettingsDialog } from "./FileManagerSettingsDialog";
 import { ProcessSettingsDialog } from "./ProcessSettingsDialog";
+import { TerminalSettingsDialog } from "./TerminalSettingsDialog";
 import { AddWidgetMenu } from "./AddWidgetMenu";
 import { DashboardDesktopChrome } from "./DashboardDesktopChrome";
 import { GridDashboard } from "./GridDashboard";
@@ -108,6 +112,7 @@ function withoutDeadSessionsForServer(
 export function DashboardView() {
   const { t } = useI18n();
   const { gridMargin } = usePersonalization();
+  const layoutLocked = useLayoutLocked();
   const pollIntervalMs = useStatusPollInterval();
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [layout, setLayout] = useState<GridItem[]>([]);
@@ -140,6 +145,11 @@ export function DashboardView() {
   const [processSettingsWidgetId, setProcessSettingsWidgetId] = useState<
     string | null
   >(null);
+  const [terminalSettingsWidgetId, setTerminalSettingsWidgetId] = useState<
+    string | null
+  >(null);
+  const [fileManagerSettingsWidgetId, setFileManagerSettingsWidgetId] =
+    useState<string | null>(null);
   const [aiSettingsWidgetId, setAiSettingsWidgetId] = useState<string | null>(
     null,
   );
@@ -530,6 +540,13 @@ export function DashboardView() {
 
   const sessionList = useMemo(() => listSessions(sessions), [sessions]);
 
+  const hasAliveSessions = useMemo(
+    () => sessionList.some((session) => isSessionAlive(session.status)),
+    [sessionList],
+  );
+
+  useLeavePageWarning(hasAliveSessions, t("dashboard.leavePageWarning"));
+
   const serverSessionsForTerminal = useMemo(
     () =>
       activeServerId ? getSessionsForServer(sessions, activeServerId) : [],
@@ -584,6 +601,7 @@ export function DashboardView() {
   }, []);
 
   const handleLayoutChange = useCallback((nextLayout: GridItem[]) => {
+    if (layoutLocked) return;
     isEditingRef.current = true;
     setLayout((current) =>
       layoutsEqual(current, nextLayout) ? current : nextLayout,
@@ -610,7 +628,7 @@ export function DashboardView() {
         }
       })();
     }, 400);
-  }, []);
+  }, [layoutLocked, t]);
 
   const handleRemoveWidget = useCallback((widgetId: string) => {
     const dashboardSnapshot = dashboardRef.current;
@@ -849,6 +867,7 @@ export function DashboardView() {
       <GridDashboard
         layout={layout}
         margin={[gridMargin, gridMargin]}
+        layoutLocked={layoutLocked}
         onLayoutChange={handleLayoutChange}
         getItemTitle={(item) => {
           const widget = widgetById.get(item.i);
@@ -915,6 +934,15 @@ export function DashboardView() {
               <div className="widget-no-drag flex items-center gap-1">
                 <Button
                   className="widget-no-drag"
+                  size="sm"
+                  variant="secondary"
+                  title={t("common.settings")}
+                  onClick={() => setTerminalSettingsWidgetId(item.i)}
+                >
+                  <Settings className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  className="widget-no-drag"
                   disabled={!activeServerId}
                   size="sm"
                   title={t("terminal.newTab")}
@@ -930,15 +958,26 @@ export function DashboardView() {
 
           if (widget.type === "file_manager") {
             return (
-              <Button
-                className="widget-no-drag"
-                size="sm"
-                variant="secondary"
-                title={t("widget.deleteTitle")}
-                onClick={() => handleRemoveWidget(item.i)}
-              >
-                <X className="h-3.5 w-3.5" />
-              </Button>
+              <div className="widget-no-drag flex items-center gap-1">
+                <Button
+                  className="widget-no-drag"
+                  size="sm"
+                  variant="secondary"
+                  title={t("common.settings")}
+                  onClick={() => setFileManagerSettingsWidgetId(item.i)}
+                >
+                  <Settings className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  className="widget-no-drag"
+                  size="sm"
+                  variant="secondary"
+                  title={t("widget.deleteTitle")}
+                  onClick={() => handleRemoveWidget(item.i)}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             );
           }
 
@@ -1107,6 +1146,7 @@ export function DashboardView() {
                 allSessions={sessionList}
                 activeServerId={activeServerId}
                 activeSessionId={activeSessionId}
+                configJson={widget.config_json}
                 onSelectSession={setActiveSessionId}
                 onAddTerminal={() => void handleAddTerminal()}
                 onCloseTerminal={handleCloseTerminal}
@@ -1120,7 +1160,9 @@ export function DashboardView() {
             return (
               <FileManagerWidget
                 activeServerId={activeServerId}
+                activeSessionId={activeSessionId}
                 sessions={sessions}
+                configJson={widget.config_json}
               />
             );
           }
@@ -1292,6 +1334,40 @@ export function DashboardView() {
         onSaved={(configJson) => {
           if (processSettingsWidgetId) {
             handleWidgetConfigChange(processSettingsWidgetId, configJson);
+          }
+        }}
+      />
+
+      <TerminalSettingsDialog
+        configJson={
+          dashboard.widgets.find(
+            (widget) => widget.id === terminalSettingsWidgetId,
+          )?.config_json ?? null
+        }
+        open={terminalSettingsWidgetId !== null}
+        onOpenChange={(open) => {
+          if (!open) setTerminalSettingsWidgetId(null);
+        }}
+        onSaved={(configJson) => {
+          if (terminalSettingsWidgetId) {
+            handleWidgetConfigChange(terminalSettingsWidgetId, configJson);
+          }
+        }}
+      />
+
+      <FileManagerSettingsDialog
+        configJson={
+          dashboard.widgets.find(
+            (widget) => widget.id === fileManagerSettingsWidgetId,
+          )?.config_json ?? null
+        }
+        open={fileManagerSettingsWidgetId !== null}
+        onOpenChange={(open) => {
+          if (!open) setFileManagerSettingsWidgetId(null);
+        }}
+        onSaved={(configJson) => {
+          if (fileManagerSettingsWidgetId) {
+            handleWidgetConfigChange(fileManagerSettingsWidgetId, configJson);
           }
         }}
       />

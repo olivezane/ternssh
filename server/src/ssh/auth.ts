@@ -1,4 +1,5 @@
 import { SSH_MSG_USERAUTH_REQUEST, SSH_MSG_USERAUTH_SUCCESS, SSH_MSG_USERAUTH_FAILURE, AuthResult } from './types';
+import { prepareOpenSSHPrivateKey } from './openssh-key';
 import { encodeString, concat, readUint32 } from './utils';
 
 interface KeyMaterial {
@@ -135,9 +136,11 @@ export class SSHAuth {
   static async buildPublicKeyAuthRequest(
     username: string,
     privateKeyPEM: string,
-    sessionID: Uint8Array
+    sessionID: Uint8Array,
+    passphrase?: string,
   ): Promise<Uint8Array> {
-    const { signingKey, publicKeyBlob, keyType } = await this.parsePrivateKey(privateKeyPEM);
+    const keyPem = await prepareOpenSSHPrivateKey(privateKeyPEM, passphrase);
+    const { signingKey, publicKeyBlob, keyType } = await this.parsePrivateKey(keyPem);
 
     const sigType = keyType === 'ssh-ed25519' ? 'ssh-ed25519' : 'rsa-sha2-512';
 

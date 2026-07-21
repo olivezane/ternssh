@@ -249,32 +249,33 @@ export function QuickCommandsWidget({
         </h3>
 
         {customCommands.length > 0 ? (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
             {customCommands.map((item) => (
-              <div key={item.id} className="flex items-center gap-1.5">
-                <Button
-                  className={cn(
-                    "h-7 min-w-0 flex-1 justify-start px-2.5 text-xs",
-                    lastRunKey === item.id &&
-                      "ring-1 ring-[var(--color-primary)]",
-                  )}
+              <div
+                key={item.id}
+                className={cn(
+                  "inline-flex h-7 max-w-full items-stretch overflow-hidden bg-[var(--color-secondary)] text-[var(--color-secondary-foreground)]",
+                  lastRunKey === item.id && "ring-1 ring-[var(--color-primary)]",
+                  !canRun && "opacity-50",
+                )}
+              >
+                <button
+                  type="button"
+                  className="min-w-0 truncate px-2.5 text-left text-xs hover:opacity-90 disabled:pointer-events-none"
                   disabled={!canRun}
-                  size="sm"
                   title={item.command}
-                  variant="secondary"
                   onClick={() => handleRun(item.id, item.command)}
                 >
-                  <span className="truncate">{item.label}</span>
-                </Button>
-                <Button
-                  className="widget-no-drag h-7 w-7 shrink-0 px-0"
-                  size="sm"
+                  {item.label}
+                </button>
+                <button
+                  type="button"
+                  className="widget-no-drag inline-flex shrink-0 items-center px-1.5 hover:bg-[color-mix(in_oklch,var(--color-foreground)_8%,transparent)]"
                   title={t("quickCommands.deleteTitle")}
-                  variant="ghost"
                   onClick={() => handleDelete(item.id)}
                 >
                   <Trash2 className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" />
-                </Button>
+                </button>
               </div>
             ))}
           </div>

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { LayoutLockToggle } from "@/components/LayoutLockToggle";
 import { Button } from "@/components/ui/button";
 import { useT } from "@/i18n";
 import { api } from "@/lib/api";
@@ -104,6 +105,10 @@ export function LayoutImportExportSection() {
       <p className="mt-1 text-[11px] text-[var(--color-muted-foreground)]">
         {t("settings.layoutHint")}
       </p>
+
+      <div className="mt-3">
+        <LayoutLockToggle />
+      </div>
 
       <input
         ref={fileInputRef}

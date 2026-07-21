@@ -25,5 +25,7 @@ export type {
 } from "./terminal-theme";
 export {
   DEFAULT_CUSTOM_TERMINAL_COLORS,
+  getAppThemeTerminalColors,
+  resolveTerminalXtermTheme,
   TERMINAL_THEME_STORAGE_KEY,
 } from "./terminal-theme";

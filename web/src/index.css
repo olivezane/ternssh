@@ -274,6 +274,10 @@ html[data-has-background="true"] .grid-dashboard-host {
   border-bottom: 1px solid color-mix(in oklch, var(--color-border) 60%, transparent);
 }
 
+.grid-dashboard-host[data-layout-locked] .widget-drag-handle {
+  padding-left: 10px;
+}
+
 .widget-drag-grip {
   display: flex;
   flex-shrink: 0;

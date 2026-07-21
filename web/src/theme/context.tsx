@@ -28,17 +28,6 @@ import {
   type ResolvedTheme,
   type ThemeMode,
 } from "./theme";
-import {
-  createDefaultTerminalThemeConfig,
-  getAppThemeTerminalColors,
-  getStoredTerminalThemeConfig,
-  resolveTerminalXtermTheme,
-  TERMINAL_THEME_STORAGE_KEY,
-  type CustomTerminalThemeColors,
-  type TerminalThemeColors,
-  type TerminalThemeConfig,
-  type TerminalThemeMode,
-} from "./terminal-theme";
 
 interface PersonalizationContextValue {
   mode: ThemeMode;
@@ -50,24 +39,12 @@ interface PersonalizationContextValue {
   setWidgetOpacity: (opacity: number) => void;
   gridMargin: number;
   setGridMargin: (margin: number) => void;
-  terminalTheme: TerminalThemeConfig;
-  resolvedTerminalColors: TerminalThemeColors;
-  setTerminalThemeMode: (mode: TerminalThemeMode) => void;
-  setTerminalThemeColor: (
-    key: keyof CustomTerminalThemeColors,
-    value: string,
-  ) => void;
-  resetTerminalThemeCustom: () => void;
   resetPersonalization: () => void;
 }
 
 const PersonalizationContext = createContext<PersonalizationContextValue | null>(
   null,
 );
-
-function persistTerminalTheme(config: TerminalThemeConfig) {
-  localStorage.setItem(TERMINAL_THEME_STORAGE_KEY, JSON.stringify(config));
-}
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<ThemeMode>(() => getStoredThemeMode());
@@ -82,14 +59,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
   const [gridMargin, setGridMarginState] = useState<number>(() =>
     getStoredGridMargin(),
-  );
-  const [terminalTheme, setTerminalThemeState] = useState<TerminalThemeConfig>(
-    () => getStoredTerminalThemeConfig(),
-  );
-
-  const resolvedTerminalColors = useMemo(
-    () => resolveTerminalXtermTheme(terminalTheme, resolvedTheme),
-    [terminalTheme, resolvedTheme],
   );
 
   useEffect(() => {
@@ -132,43 +101,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(GRID_MARGIN_STORAGE_KEY, String(clamped));
   }, []);
 
-  const setTerminalThemeMode = useCallback((next: TerminalThemeMode) => {
-    setTerminalThemeState((current) => {
-      const nextConfig: TerminalThemeConfig = {
-        ...current,
-        mode: next,
-      };
-      persistTerminalTheme(nextConfig);
-      return nextConfig;
-    });
-  }, []);
-
-  const setTerminalThemeColor = useCallback(
-    (key: keyof CustomTerminalThemeColors, value: string) => {
-      setTerminalThemeState((current) => {
-        const nextConfig: TerminalThemeConfig = {
-          mode: "custom",
-          custom: {
-            ...current.custom,
-            [key]: value.toLowerCase(),
-          },
-        };
-        persistTerminalTheme(nextConfig);
-        return nextConfig;
-      });
-    },
-    [],
-  );
-
-  const resetTerminalThemeCustom = useCallback(() => {
-    const nextConfig: TerminalThemeConfig = {
-      mode: "custom",
-      custom: getAppThemeTerminalColors(resolvedTheme),
-    };
-    setTerminalThemeState(nextConfig);
-    persistTerminalTheme(nextConfig);
-  }, [resolvedTheme]);
-
   const resetPersonalization = useCallback(() => {
     const defaultMode = DEFAULT_THEME_MODE;
     setModeState(defaultMode);
@@ -187,10 +119,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const margin = applyGridMargin(GRID_MARGIN_DEFAULT);
     setGridMarginState(margin);
     localStorage.setItem(GRID_MARGIN_STORAGE_KEY, String(margin));
-
-    const nextTerminal = createDefaultTerminalThemeConfig();
-    setTerminalThemeState(nextTerminal);
-    persistTerminalTheme(nextTerminal);
   }, []);
 
   useEffect(() => {
@@ -216,11 +144,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setWidgetOpacity,
       gridMargin,
       setGridMargin,
-      terminalTheme,
-      resolvedTerminalColors,
-      setTerminalThemeMode,
-      setTerminalThemeColor,
-      resetTerminalThemeCustom,
       resetPersonalization,
     }),
     [
@@ -233,11 +156,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setWidgetOpacity,
       gridMargin,
       setGridMargin,
-      terminalTheme,
-      resolvedTerminalColors,
-      setTerminalThemeMode,
-      setTerminalThemeColor,
-      resetTerminalThemeCustom,
       resetPersonalization,
     ],
   );

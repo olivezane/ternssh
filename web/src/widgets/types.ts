@@ -47,6 +47,7 @@ export interface TerminalWidgetProps {
   allSessions: ServerSession[];
   activeServerId: string | null;
   activeSessionId: string | null;
+  configJson: string | null;
   onSelectSession: (sessionId: string) => void;
   onAddTerminal: () => void;
   onCloseTerminal: (sessionId: string) => void;

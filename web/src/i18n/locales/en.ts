@@ -57,14 +57,6 @@ export const en: Messages = {
     layoutSpacing: "Layout spacing",
     layoutSpacingHint:
       "Adjust gaps between dashboard widgets and the space below the header",
-    terminalTheme: "Terminal theme",
-    terminalThemeDefault: "Follow app theme",
-    terminalThemeCustom: "Custom",
-    terminalThemeHint:
-      "Background follows widget opacity; default uses app theme text and cursor colors",
-    terminalThemeReset: "Reset to current app theme colors",
-    terminalColorForeground: "Text",
-    terminalColorCursor: "Cursor",
   },
   settings: {
     resetAllTitle: "Reset all settings",
@@ -94,6 +86,9 @@ export const en: Messages = {
     layoutImportConfirm:
       "Replace the current dashboard layout with the imported file?",
     layoutImportSummary: "{count} widgets from “{name}”",
+    layoutLock: "Lock layout",
+    layoutLockHint:
+      "Hide drag and resize handles on widgets to prevent accidental changes",
     statusPollInterval: "Status sample interval (seconds)",
     statusPollIntervalHint:
       "Applies to all status widgets (server, network, process, container). Range {min}–{max}s. Bandwidth charts show the last {minutes} minutes{slots}.",
@@ -155,6 +150,8 @@ export const en: Messages = {
     moveFailed: "Failed to move item",
     createSessionFailed: "Failed to create session",
     sessionCount: "{count} sessions",
+    leavePageWarning:
+      "Active SSH sessions will be disconnected if you leave this page.",
   },
   session: {
     connecting: "Connecting",
@@ -184,6 +181,17 @@ export const en: Messages = {
     tabCount: "{count} terminals · {status}",
     newTab: "New terminal",
     closeTab: "Close terminal",
+    settingsTitle: "Terminal settings",
+    fontSize: "Font size",
+    fontSizeHint: "Adjust terminal text size ({min}–{max}px)",
+    terminalTheme: "Terminal theme",
+    terminalThemeDefault: "Follow app theme",
+    terminalThemeCustom: "Custom",
+    terminalThemeHint:
+      "Background follows widget opacity; default uses app theme text and cursor colors",
+    terminalThemeReset: "Reset to current app theme colors",
+    terminalColorForeground: "Text",
+    terminalColorCursor: "Cursor",
   },
   serverList: {
     loading: "Loading...",
@@ -249,6 +257,10 @@ export const en: Messages = {
     uploadEmpty: "The key file is empty",
     uploadFailed: "Failed to read the key file",
     pastePlaceholder: "Or paste private key content here",
+    passphrase: "Key passphrase",
+    passphraseHint: "Required if the private key is encrypted",
+    passphraseRequired: "This private key is encrypted. Enter its passphrase.",
+    encryptedDetected: "Encrypted private key detected. Enter its passphrase.",
     saveForLater: "Save private key for later use",
     keyNamePlaceholder: "Key name (for identification)",
     deleteSavedKey: "Delete saved private key",
@@ -274,6 +286,10 @@ export const en: Messages = {
   fileManager: {
     selectServer: "Select or connect a server to browse remote files",
     connectFirst: "Connect a terminal session before using the file manager",
+    settingsTitle: "File manager settings",
+    followTerminalCwd: "Follow terminal directory",
+    followTerminalCwdHint:
+      "When enabled, the file manager navigates to match the active terminal tab after cd commands",
     home: "Home",
     parent: "Parent directory",
     upload: "Upload file",
