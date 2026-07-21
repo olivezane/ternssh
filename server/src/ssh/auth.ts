@@ -139,10 +139,12 @@ export class SSHAuth {
     sessionID: Uint8Array,
     passphrase?: string,
   ): Promise<Uint8Array> {
-    const keyPem = await prepareOpenSSHPrivateKey(privateKeyPEM, passphrase);
+    // 只有 OpenSSH 格式的密钥才需要处理加密/解密
+    const isOpenSSH = privateKeyPEM.includes('OPENSSH PRIVATE KEY');
+    const keyPem = isOpenSSH ? await prepareOpenSSHPrivateKey(privateKeyPEM, passphrase) : privateKeyPEM;
     const { signingKey, publicKeyBlob, keyType } = await this.parsePrivateKey(keyPem);
 
-    const sigType = keyType === 'ssh-ed25519' ? 'ssh-ed25519' : 'rsa-sha2-512';
+    const sigType = keyType === 'ssh-rsa' ? 'rsa-sha2-512' : keyType;
 
     const requestBody = concat(
       new Uint8Array([SSH_MSG_USERAUTH_REQUEST]),
@@ -159,6 +161,14 @@ export class SSHAuth {
     let rawSignature: Uint8Array;
     if (keyType === 'ssh-ed25519') {
       rawSignature = new Uint8Array(await crypto.subtle.sign('Ed25519', signingKey, dataToSign));
+    } else if (keyType.startsWith('ecdsa-sha2-')) {
+      const curve = keyType.replace('ecdsa-sha2-', '');
+      const { hash } = this.ecCurveParams(curve);
+      rawSignature = new Uint8Array(await crypto.subtle.sign(
+        { name: 'ECDSA', hash },
+        signingKey,
+        dataToSign,
+      ));
     } else {
       rawSignature = new Uint8Array(await crypto.subtle.sign(
         { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-512' },
